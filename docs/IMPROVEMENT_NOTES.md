@@ -135,3 +135,36 @@ Compiled production Swift helpers passed **1,061 logging checks**, including
 64,000 concurrent bucketed events and 1,000 concurrent file appends, stable IDs,
 rotation/truncation, descriptor reuse, failed writes, and stop-before-open.
 UIKit/SwiftUI integration remains syntax-only validated on this host.
+
+## Prefix installation and startup integrity
+
+Replaced the 512-byte-copy, unchecked tar reader with a 64 KiB streaming
+installer. It handles the actual bundled template's ustar prefix names, PAX
+path/size records, and GNU long names; validates tar checksums, declared sizes,
+member paths/types, both end blocks, and the gzip CRC/trailer; and bounds entries,
+depth, metadata, individual files, and total decompressed bytes. Symlink/hardlink,
+device, and sparse archive entries are deliberately rejected (the bundled
+archive has none). Unexpected archive roots and reserved staging paths fail.
+
+All extraction is private staging first. Only after full archive validation are
+complete, fsynced files linked into the prefix. Existing regular files, including
+registries and saves, are preserved. The completion marker is installed last.
+A merge I/O error can leave complete new files for a non-destructive retry; this
+is not a claim of an atomic whole-directory replacement or power-loss proofing.
+Staging is cleaned on ordinary failures. Destination-relative directory walks
+never follow symlinks. The caller supplies an existing destination parent.
+
+A portable readiness gate checks essential files before Wine startup. Prefix
+preparation errors now propagate to wineserver_start; Wine refuses to start
+without its server. Registry/profile repair no longer runs again from the Wine
+process thread after the server already owns the registry. dosdevices/c: repair
+will only replace a symlink, never recursively delete an existing user directory.
+Existing damaged registries are not silently overwritten with default data.
+
+**850 assertions across 174 archive fixtures passed under ASan/UBSan**, including
+128 deterministic header mutations and comparison of every one of the **138
+shipped template members** (32 regular files byte-for-byte via SHA-256 and 106
+directories). Tests cover long names, corrupt headers/trailers, truncation,
+partial-seed recovery, preserved user data, links, conflicting file types,
+resource limits, and missing/empty essential prefix files. Objective-C startup
+integration still requires an Apple build and a fresh-prefix device test.

@@ -27,4 +27,7 @@ swiftc -warnings-as-errors -o "$OUT/log-test" \
     "$ROOT/app/Madeira/LogPattern.swift" "$ROOT/tests/swift/LogTests.swift"
 "$OUT/log-test"
 swiftc -frontend -parse "$ROOT/app/Madeira/LogStore.swift"
+"$CC" "${CFLAGS[@]}" "$ROOT/tests/prefix_extractor_driver.c" \
+    "$ROOT/app/Madeira/PrefixExtractor.c" -lz -o "$OUT/prefix-test"
+python3 "$ROOT/tests/test_prefix_extractor.py" "$OUT/prefix-test"
 echo 'Portable suites passed.'

@@ -304,42 +304,66 @@ static char *g_prefix_path = NULL;
  * ActivatableClassId (Thumper aborts on RoGetActivationFactory for
  * Windows.Gaming.Input.Gamepad), and no Fonts keys (the #61/#70 dwrite fix).
  */
-void madeira_seed_prefix_if_needed(const char *prefix_path) {
+int madeira_seed_prefix_if_needed(const char *prefix_path) {
     @autoreleasepool {
-        if (!prefix_path) return;
+        if (!prefix_path || !*prefix_path) return -1;
         NSString *prefix = [NSString stringWithUTF8String:prefix_path];
+        if (!prefix) return -1;
         NSString *stamp = [prefix stringByAppendingPathComponent:@".update-timestamp"];
         NSFileManager *fm = [NSFileManager defaultManager];
-
-        [fm createDirectoryAtPath:prefix withIntermediateDirectories:YES attributes:nil error:nil];
-
-        if (![fm fileExistsAtPath:stamp]) {
-            NSString *tgz = [[NSBundle mainBundle] pathForResource:@"prefix-template" ofType:@"tar.gz"];
-            if (!tgz) {
-                LOG("prefix-template.tar.gz missing from bundle!");
-            } else {
-                LOG("Seeding prefix from %{public}s", tgz.UTF8String);
-                if (madeira_extract_prefix_tgz(tgz.UTF8String, prefix_path) != 0) {
-                    LOG("prefix extraction FAILED");
-                } else {
-                    LOG("prefix seeded to %{public}s", prefix_path);
+        NSError *error = nil;
+        if (![fm createDirectoryAtPath:prefix withIntermediateDirectories:YES attributes:nil error:&error]) {
+            LOG("Cannot create prefix: %{public}s", error.localizedDescription.UTF8String);
+            return -1;
+        }
+        if (!madeira_prefix_is_ready(prefix_path)) {
+            // This is an internal completion marker, never a registry/save.
+            // Remove a stale regular marker before retrying a partial seed.
+            struct stat st;
+            if (!lstat(stamp.UTF8String, &st)) {
+                if (!S_ISREG(st.st_mode) || unlink(stamp.UTF8String)) {
+                    LOG("Invalid/unremovable prefix completion marker; not touching user data");
+                    return -1;
                 }
+            } else if (errno != ENOENT) return -1;
+            NSString *tgz = [[NSBundle mainBundle] pathForResource:@"prefix-template" ofType:@"tar.gz"];
+            if (!tgz) { LOG("prefix-template.tar.gz missing from bundle!"); return -1; }
+            LOG("Seeding missing prefix files from %{public}s", tgz.UTF8String);
+            if (madeira_extract_prefix_tgz(tgz.UTF8String, prefix_path) || !madeira_prefix_is_ready(prefix_path)) {
+                // Existing empty/damaged registry files are not overwritten.
+                // Do not let wineserver start and replace them with empty state.
+                (void)unlink(stamp.UTF8String);
+                LOG("Prefix validation/installation FAILED; existing files preserved; startup aborted");
+                return -1;
             }
+            LOG("Prefix validated and seeded to %{public}s", prefix_path);
         }
 
-        // (Re)create dosdevices/c: -> ../drive_c. The tarball omits
-        // dosdevices because Mac's z: -> / is wrong here.
+        // dosdevices must be a real directory. Only replace an existing
+        // symbolic c: link; never recursively delete a user-owned c: folder.
         NSString *dosdev = [prefix stringByAppendingPathComponent:@"dosdevices"];
-        [fm createDirectoryAtPath:dosdev withIntermediateDirectories:YES attributes:nil error:nil];
+        if (mkdir(dosdev.UTF8String, 0755) && errno != EEXIST) return -1;
+        struct stat st;
+        if (lstat(dosdev.UTF8String, &st) || !S_ISDIR(st.st_mode)) {
+            LOG("dosdevices is not a real directory; startup aborted"); return -1;
+        }
         NSString *cLink = [dosdev stringByAppendingPathComponent:@"c:"];
-        [fm removeItemAtPath:cLink error:nil];
-        [fm createSymbolicLinkAtPath:cLink withDestinationPath:@"../drive_c" error:nil];
+        if (!lstat(cLink.UTF8String, &st)) {
+            if (!S_ISLNK(st.st_mode)) {
+                LOG("dosdevices/c: is not a symlink; preserving it and aborting startup"); return -1;
+            }
+            char target[PATH_MAX];
+            ssize_t n = readlink(cLink.UTF8String, target, sizeof(target));
+            if (n == (ssize_t)(sizeof("../drive_c") - 1) && !memcmp(target, "../drive_c", sizeof("../drive_c") - 1)) {
+                // Already correct; avoid a needless unlink/recreate window.
+            } else if (unlink(cLink.UTF8String) || symlink("../drive_c", cLink.UTF8String)) return -1;
+        } else if (errno != ENOENT || symlink("../drive_c", cLink.UTF8String)) return -1;
 
-        /* ml666: repair the usersmadeira escaping damage BEFORE anything reads
-         * the registry, then the (now scoped) ml581 legacy cleanup. */
-        madeira_repair_profile( prefix );
-        /* ml581: see madeira_undo_appdata_skeleton() above. */
-        madeira_undo_appdata_skeleton( prefix );
+        // These registry/profile repairs run only BEFORE the server owns the
+        // registry, not again concurrently from the Wine process thread.
+        madeira_repair_profile(prefix);
+        madeira_undo_appdata_skeleton(prefix);
+        return 0;
     }
 }
 
@@ -352,11 +376,8 @@ static void *wine_process_thread(void *arg) {
         pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
         LOG("Wine process thread started");
 
-        /* ml588: seeding itself now happens in wineserver_start(), BEFORE the
-         * server loads the registry. Kept here as a safety net for any path
-         * that reaches Wine without going through wineserver_start() — the
-         * stamp probe makes it a no-op stat once the prefix exists. */
-        madeira_seed_prefix_if_needed(g_prefix_path);
+        /* Prefix preparation has already completed in wineserver_start().
+         * Rewriting registries here races the running server's registry I/O. */
 
         // Set environment for Wine
         setenv("WINEPREFIX", g_prefix_path, 1);
@@ -944,13 +965,16 @@ static void *wine_process_thread(void *arg) {
 }
 
 int wine_process_start(const char *prefix_path) {
+    if (!prefix_path || !*prefix_path || !wineserver_is_running()) return -1;
     if (g_wine_running) {
         LOG("Wine process already running");
         return 0;
     }
 
-    if (g_prefix_path) free(g_prefix_path);
-    g_prefix_path = strdup(prefix_path);
+    char *copy = strdup(prefix_path);
+    if (!copy) return -1;
+    free(g_prefix_path);
+    g_prefix_path = copy;
 
     LOG("Starting Wine process with prefix: %{public}s", prefix_path);
 

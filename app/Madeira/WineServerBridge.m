@@ -8,6 +8,7 @@
 #import <stdarg.h>
 
 #include "WineServerBridge.h"
+#include "WineProcessBridge.h"
 #include <sys/time.h>
 
 static FILE *g_ws_bridge_log = NULL;
@@ -130,14 +131,17 @@ static void *wineserver_thread_func(void *arg) {
 }
 
 int wineserver_start(const char *prefix_path) {
+    if (!prefix_path || !*prefix_path) return -1;
     if (g_wineserver_running) {
         wine_log_msg("Wineserver already running");
         return 0;
     }
 
     // Store prefix path
-    if (g_prefix_path) free(g_prefix_path);
-    g_prefix_path = strdup(prefix_path);
+    char *copy = strdup(prefix_path);
+    if (!copy) return -1;
+    free(g_prefix_path);
+    g_prefix_path = copy;
 
     wine_log_msg("Starting wineserver with prefix: %s", prefix_path);
 
@@ -146,9 +150,9 @@ int wineserver_start(const char *prefix_path) {
      * not on disk by then the server builds an empty registry and its first
      * save overwrites the template's (ml587: 17,479 keys -> 24). Seeding is
      * idempotent, so this costs one stat() on every launch after the first. */
-    {
-        extern void madeira_seed_prefix_if_needed(const char *prefix_path);
-        madeira_seed_prefix_if_needed(prefix_path);
+    if (madeira_seed_prefix_if_needed(prefix_path) != 0) {
+        wine_log_msg("Prefix preparation failed; refusing to start wineserver");
+        return -1;
     }
 
     g_wineserver_running = 1;
