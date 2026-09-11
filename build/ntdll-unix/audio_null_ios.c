@@ -20,7 +20,7 @@
  *   the ring + atomics, never Wine) -> copy ring to hardware, advance
  *   play_pos; underrun plays silence
  *   get_current_padding -> write_pos - play_pos
- *   get_position        -> play_pos (frames actually consumed)
+ *   get_position        -> clock_frames (rendered frames, including silence)
  *   timer_loop          -> Wine thread; signals the client event per period
  * If AudioUnit setup fails (no session, etc.) the driver degrades to the
  * Tier-1 wall-clock null behaviour so game timing never breaks.
@@ -310,7 +310,10 @@ struct ios_stream {
     int au_running;
     BYTE *ring;
     _Atomic uint64_t write_pos;  /* frames produced by the game (monotonic) */
-    _Atomic uint64_t play_pos;   /* frames consumed by the RT callback */
+    _Atomic uint64_t play_pos;   /* queued frames consumed by the RT callback */
+    _Atomic uint64_t clock_frames; /* all hardware render frames, including underruns */
+    _Atomic uint64_t underruns;    /* count callbacks short of queued audio; never log in RT */
+    _Atomic uint32_t gain_bits[2]; /* float bits, lock-free loads once per callback */
 };
 
 /* ml739: one stream object per client, mirroring Wine's CoreAudio driver.
@@ -463,32 +466,101 @@ static UINT32 ios_padding(const struct ios_stream *s) {
 
 /* ------------------- Tier-2: RemoteIO real output ------------------- */
 
-/* Core Audio real-time thread. Ring + atomics ONLY — no Wine calls, no
- * locks, no allocation, no logging. Underrun = silence (WASAPI-correct:
- * padding drains to 0 and the position clock pauses at write_pos). */
+/* Only control-side calls sanitize and combine channel/session/master gains.
+ * Atomic integer bit patterns avoid a possibly non-lock-free atomic float ABI. */
+static float ios_gain(float value) {
+    return !isfinite(value) || value <= 0 ? 0 : (value >= 1 ? 1 : value);
+}
+
+/* Unity is a byte-exact fast path. The slow path supports every negotiated
+ * linear sample type, including unsigned 8-bit and packed, unaligned 24-bit.
+ * Gains cannot amplify, so integer conversion cannot overflow. */
+static int ios_apply_volume(const struct ios_stream *s, BYTE *data, UINT32 frames) {
+    float gain[2] = {1, 1};
+    for (UINT32 ch = 0; ch < s->channels; ++ch) {
+        uint32_t bits = atomic_load_explicit(&s->gain_bits[ch], memory_order_relaxed);
+        memcpy(&gain[ch], &bits, sizeof(bits));
+    }
+    if (gain[0] == 1 && (s->channels == 1 || gain[1] == 1)) return 0;
+    if (gain[0] == 0 && (s->channels == 1 || gain[1] == 0)) {
+        memset(data, s->silence_byte, (size_t)frames * s->frame_bytes);
+        return 1;
+    }
+    UINT32 bytes = s->bits / 8;
+    for (UINT32 frame = 0; frame < frames; ++frame) {
+        for (UINT32 ch = 0; ch < s->channels; ++ch) {
+            BYTE *sample = data + (size_t)frame * s->frame_bytes + ch * bytes;
+            float g = gain[ch];
+            if (g == 1) continue;
+            if (g == 0) { memset(sample, s->silence_byte, bytes); continue; }
+            if (s->float_samples) {
+                float value;
+                memcpy(&value, sample, sizeof(value));
+                value = isfinite(value) ? value * g : 0;
+                memcpy(sample, &value, sizeof(value));
+            } else if (s->bits == 8) {
+                *sample = (BYTE)((int32_t)(((int)*sample - 128) * (double)g) + 128);
+            } else if (s->bits == 16) {
+                int16_t value;
+                memcpy(&value, sample, sizeof(value));
+                value = (int16_t)(value * (double)g);
+                memcpy(sample, &value, sizeof(value));
+            } else if (s->bits == 24) {
+                int32_t value = sample[0] | (sample[1] << 8) | (sample[2] << 16);
+                if (value & 0x800000) value -= 0x1000000;
+                uint32_t scaled = (uint32_t)(int32_t)(value * (double)g);
+                sample[0] = (BYTE)scaled;
+                sample[1] = (BYTE)(scaled >> 8);
+                sample[2] = (BYTE)(scaled >> 16);
+            } else {
+                int32_t value;
+                memcpy(&value, sample, sizeof(value));
+                value = (int32_t)(value * (double)g);
+                memcpy(sample, &value, sizeof(value));
+            }
+        }
+    }
+    return 0;
+}
+
+/* Core Audio real-time thread: no locks, allocation, logging, or Wine calls.
+ * Queue consumption and the render clock are separate: a hardware underrun
+ * drains padding but must NOT freeze the clock while the device plays silence.
+ * This clock is callback-granular; it does not compensate speaker latency. */
 static OSStatus ios_audio_render_cb(void *refcon, AudioUnitRenderActionFlags *flags,
                                     const AudioTimeStamp *ts, UInt32 bus,
                                     UInt32 nframes, AudioBufferList *iodata) {
     struct ios_stream *s = refcon;
-    BYTE *out = (BYTE *)iodata->mBuffers[0].mData;
-    UINT32 fb = s->frame_bytes;
-    UINT32 cap = s->buffer_frames;
+    (void)ts; (void)bus;
+    if (!s || !iodata || iodata->mNumberBuffers != 1 ||
+        iodata->mBuffers[0].mNumberChannels != s->channels) return kAudio_ParamError;
+    if (!nframes) return noErr;
+    uint64_t needed = (uint64_t)nframes * s->frame_bytes;
+    if (!iodata->mBuffers[0].mData || needed > iodata->mBuffers[0].mDataByteSize)
+        return kAudio_ParamError;
+    BYTE *out = iodata->mBuffers[0].mData;
+    UINT32 fb = s->frame_bytes, cap = s->buffer_frames;
     uint64_t play = atomic_load_explicit(&s->play_pos, memory_order_relaxed);
     uint64_t wr = atomic_load_explicit(&s->write_pos, memory_order_acquire);
     uint64_t avail = wr - play;
-    UInt32 tocopy = avail < nframes ? (UInt32)avail : nframes;
-    UInt32 i = 0;
-    (void)flags; (void)ts; (void)bus;
-    while (i < tocopy) {
-        UINT32 idx = (UINT32)((play + i) % cap);
-        UINT32 chunk = cap - idx;
-        if (chunk > tocopy - i) chunk = tocopy - i;
-        memcpy(out + (size_t)i * fb, s->ring + (size_t)idx * fb, (size_t)chunk * fb);
-        i += chunk;
+    if (!cap || avail > cap) return kAudio_ParamError;
+    UINT32 tocopy = avail < nframes ? (UINT32)avail : nframes;
+    if (tocopy) {
+        UINT32 index = (UINT32)(play % cap);
+        UINT32 first = cap - index;
+        if (first > tocopy) first = tocopy;
+        memcpy(out, s->ring + (size_t)index * fb, (size_t)first * fb);
+        if (tocopy > first)
+            memcpy(out + (size_t)first * fb, s->ring, (size_t)(tocopy - first) * fb);
     }
-    if (tocopy < nframes)
-        memset(out + (size_t)tocopy * fb, 0, (size_t)(nframes - tocopy) * fb);
+    int muted = ios_apply_volume(s, out, tocopy);
+    if (tocopy < nframes) {
+        memset(out + (size_t)tocopy * fb, s->silence_byte, (size_t)(nframes - tocopy) * fb);
+        atomic_fetch_add_explicit(&s->underruns, 1, memory_order_relaxed);
+    }
+    if (flags && (!tocopy || muted)) *flags |= kAudioUnitRenderAction_OutputIsSilence;
     atomic_store_explicit(&s->play_pos, play + tocopy, memory_order_release);
+    atomic_fetch_add_explicit(&s->clock_frames, nframes, memory_order_relaxed);
     return noErr;
 }
 
@@ -675,6 +747,12 @@ static NTSTATUS ios_create_stream(void *args) {
     atomic_init(&s->event, NULL);
     atomic_init(&s->write_pos, 0);
     atomic_init(&s->play_pos, 0);
+    atomic_init(&s->clock_frames, 0);
+    atomic_init(&s->underruns, 0);
+    float unity = 1;
+    uint32_t unity_bits;
+    memcpy(&unity_bits, &unity, sizeof(unity_bits));
+    for (unsigned ch = 0; ch < 2; ++ch) atomic_init(&s->gain_bits[ch], unity_bits);
     s->sample_rate = p->fmt->nSamplesPerSec;
     s->channels = p->fmt->nChannels;
     s->frame_bytes = p->fmt->nBlockAlign;
@@ -732,12 +810,15 @@ static NTSTATUS ios_start(void *args) {
     struct stream_handle_params *p = args;
     struct ios_stream *s = stream_from_handle(p->stream);
     if (!s) { p->result = AUDCLNT_E_NOT_INITIALIZED; return STATUS_SUCCESS; }
-    if (!s->started) {
+    if (s->started) { p->result = AUDCLNT_E_NOT_STOPPED; return STATUS_SUCCESS; }
+    {
         if (s->au && !s->au_running) {
             OSStatus err = AudioOutputUnitStart(s->au);
             if (err) {
                 fprintf(stderr, "[ios_audio] AudioOutputUnitStart: %d — null-mode\n", (int)err);
                 ios_audio_teardown_unit(s);
+                /* Preserve position if a previously working unit cannot resume. */
+                s->accumulated_frames = atomic_load(&s->clock_frames);
             } else {
                 s->au_running = 1;
             }
@@ -753,14 +834,13 @@ static NTSTATUS ios_stop(void *args) {
     struct stream_handle_params *p = args;
     struct ios_stream *s = stream_from_handle(p->stream);
     if (!s) { p->result = AUDCLNT_E_NOT_INITIALIZED; return STATUS_SUCCESS; }
-    if (s->started) {
-        if (s->au && s->au_running) {
-            AudioOutputUnitStop(s->au);
-            s->au_running = 0;
-        }
-        s->accumulated_frames = elapsed_frames(s);
-        s->started = 0;
+    if (!s->started) { p->result = S_FALSE; return STATUS_SUCCESS; }
+    if (s->au && s->au_running) {
+        if (AudioOutputUnitStop(s->au)) { p->result = E_FAIL; return STATUS_SUCCESS; }
+        s->au_running = 0;
     }
+    s->accumulated_frames = s->au ? atomic_load(&s->clock_frames) : elapsed_frames(s);
+    s->started = 0;
     p->result = S_OK;
     return STATUS_SUCCESS;
 }
@@ -776,6 +856,8 @@ static NTSTATUS ios_reset(void *args) {
     /* AudioOutputUnitStop has quiesced RemoteIO; resetting live counters races. */
     atomic_store(&s->write_pos, 0);
     atomic_store(&s->play_pos, 0);
+    atomic_store(&s->clock_frames, 0);
+    atomic_store(&s->underruns, 0);
     s->pending_frames = 0;
     p->result = S_OK;
     return STATUS_SUCCESS;
@@ -966,12 +1048,12 @@ static NTSTATUS ios_get_position(void *args) {
     struct get_position_params *p = args;
     struct ios_stream *s = stream_from_handle(p->stream);
     if (!s) { if (p->pos) *p->pos = 0; p->result = AUDCLNT_E_NOT_INITIALIZED; return STATUS_SUCCESS; }
-    /* THIS is the function that drives FMOD's clock. Tier-2: frames the
-     * RT callback actually consumed — the true hardware clock. Null-mode
-     * fallback: wall-clock synthesis as before. */
+    /* The clock advances through underruns, freezes after Stop, and resets
+     * only on Reset. Null fallback synthesizes the same units from host time. */
+    if (!p->pos) { p->result = E_POINTER; return STATUS_SUCCESS; }
     if (p->pos) {
         if (s->au)
-            *p->pos = atomic_load(&s->play_pos);
+            *p->pos = atomic_load(&s->clock_frames);
         else
             *p->pos = elapsed_frames(s);
     }
@@ -981,7 +1063,17 @@ static NTSTATUS ios_get_position(void *args) {
 }
 
 static NTSTATUS ios_set_volumes(void *args) {
-    (void)args;
+    struct set_volumes_params *p = args;
+    struct ios_stream *s = stream_from_handle(p->stream);
+    if (!s) return STATUS_SUCCESS;
+    float master = ios_gain(p->master_volume);
+    for (UINT32 ch = 0; ch < s->channels; ++ch) {
+        float gain = master * (p->volumes ? ios_gain(p->volumes[ch]) : 1) *
+                              (p->session_volumes ? ios_gain(p->session_volumes[ch]) : 1);
+        uint32_t bits;
+        memcpy(&bits, &gain, sizeof(bits));
+        atomic_store_explicit(&s->gain_bits[ch], bits, memory_order_relaxed);
+    }
     return STATUS_SUCCESS;
 }
 

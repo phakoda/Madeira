@@ -21,13 +21,9 @@ fi
 "$CC" "${CFLAGS[@]}" "$ROOT/tests/input_queue_test.c" -o "$OUT/input-test"
 "$OUT/input-test"
 "$CC" "${CFLAGS[@]}" "$ROOT/tests/surface_queue_test.c" -o "$OUT/surface-queue-test"
-"$CC" "${CFLAGS[@]}" -pthread -I "$ROOT/tests/audio-stubs"     "$ROOT/tests/audio_driver_test.c" -o "$OUT/audio-test"
-if ! "$OUT/audio-test" 2>"$OUT/audio-test.err"; then
-    cat "$OUT/audio-test.err" >&2
-    exit 1
-fi
 "$OUT/surface-queue-test"
-"$CC" "${CFLAGS[@]}" -pthread -I "$ROOT/tests/audio-stubs"     "$ROOT/tests/audio_driver_test.c" -o "$OUT/audio-test"
+"$CC" "${CFLAGS[@]}" -pthread -I "$ROOT/tests/audio-stubs" \
+    "$ROOT/tests/audio_driver_test.c" -o "$OUT/audio-test"
 if ! "$OUT/audio-test" 2>"$OUT/audio-test.err"; then
     cat "$OUT/audio-test.err" >&2
     exit 1

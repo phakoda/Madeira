@@ -44,3 +44,37 @@ Changes:
 
 These changes affect `libntdll_unix.a` and require rebuilding it. Bundled binary
 libraries are supplied input artifacts, not rebuilt by this host-only pass.
+
+## Real-time audio, volume and clock
+
+The follow-on audio suite additionally runs one million sequenced frames through
+concurrent production and rendering, checking every delivered frame and every
+underrun tail. The exact assertion count varies with host scheduling (over one
+million checks). Sanitizers pass. Further coverage checks all negotiated PCM
+widths, unaligned packed samples, float32, unity/mute/per-channel/session gain,
+invalid output layouts and byte bounds, unsigned silence, and restart failure.
+
+- Implement previously ignored master, stream-channel and session-channel volume
+  by combining bounded gains on the control side. Apply them when consuming the
+  queue, so volume changes affect already-buffered sound. Unity is byte-exact and
+  bypasses sample arithmetic; mute uses a bulk fill. Callback loads are lock-free
+  atomic integer bit patterns. Nonfinite control values cannot trigger undefined
+  float-to-integer conversions or amplification.
+- Validate the interleaved AudioBufferList and its byte capacity before writing;
+  copy a wrapped ring in at most two chunks. There is no callback allocation,
+  logging, registry lock, or Wine API call. Fill unsigned PCM8 silence with 128,
+  not zero, and report fully silent output to Core Audio.
+- Separate queue consumption from the rendered-frame clock. Underruns now advance
+  time while padding stays zero. Stop/resume preserves position; Reset clears it;
+  a failed hardware resume carries position into clock-only fallback. The clock
+  remains callback-granular, not a measured speaker-latency-corrected timestamp.
+- Return the documented repeated Start/Stop statuses. A failed AudioUnit stop
+  does not falsely mark a still-running callback as quiescent.
+- Count underruns atomically without logging from the render callback.
+
+Contracts were cross-checked against Microsoft's IAudioRenderClient GetBuffer /
+ReleaseBuffer and IAudioClient Reset / Start / Stop / IAudioClock GetPosition
+references. The 37-entry dispatch ordering and audio parameter structures were
+also inspected against the pinned Wine `dlls/mmdevapi/unixlib.h` at
+`7817e220384e895651f868ba4d97affcf21b3816`. The tests' Apple declarations are
+boundary mocks, not a substitute for compiling with the genuine Apple SDK.

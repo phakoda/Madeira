@@ -237,10 +237,171 @@ static void timer_lifetime(void) {
     timer_joined = NULL;
 }
 
+static OSStatus render(struct ios_stream *s, UINT32 frames, void *data, UINT32 bytes,
+                       AudioUnitRenderActionFlags *flags) {
+    AudioBufferList buffers = {.mNumberBuffers = 1, .mBuffers = {{s->channels, bytes, data}}};
+    return s->au->cb.inputProc(s->au->cb.inputProcRefCon, flags, NULL, 0, frames, &buffers);
+}
+static UINT64 position(stream_handle h) {
+    UINT64 pos = UINT64_MAX;
+    struct get_position_params p = {.stream = h, .pos = &pos};
+    ios_get_position(&p); CHECK(p.result == S_OK); return pos;
+}
+static void set_volume(stream_handle h, float master, const float *channels, const float *session) {
+    struct set_volumes_params p = {h, master, channels, session}; ios_set_volumes(&p);
+}
+static void callback_contract(void) {
+    struct WAVEFORMATEX_stub f = format(8, 2, 48000, 1);
+    stream_handle h = create(&f, 0); struct ios_stream *s = stream_from_handle(h);
+    BYTE out[130], *data; memset(out, 0xaa, sizeof(out));
+    AudioUnitRenderActionFlags flags = 0;
+    CHECK(start(h) == S_OK && start(h) == AUDCLNT_E_NOT_STOPPED);
+    CHECK(render(s, 64, out + 1, 127, &flags) == kAudio_ParamError);
+    CHECK(render(s, UINT32_MAX, out + 1, 128, &flags) == kAudio_ParamError);
+    CHECK(render(s, 1, NULL, 128, &flags) == kAudio_ParamError);
+    CHECK(render(s, 0, NULL, 0, &flags) == noErr);
+    CHECK(ios_audio_render_cb(s, &flags, NULL, 0, 1, NULL) == kAudio_ParamError);
+    AudioBufferList invalid = {.mNumberBuffers = 0};
+    CHECK(ios_audio_render_cb(s, &flags, NULL, 0, 1, &invalid) == kAudio_ParamError);
+    invalid.mNumberBuffers = 1; invalid.mBuffers[0].mNumberChannels = 1;
+    CHECK(ios_audio_render_cb(s, &flags, NULL, 0, 1, &invalid) == kAudio_ParamError);
+    for (unsigned i = 0; i < sizeof(out); ++i) CHECK(out[i] == 0xaa);
+    CHECK(position(h) == 0 && !s->underruns);
+    CHECK(render(s, 64, out + 1, 128, &flags) == noErr);
+    CHECK(flags & kAudioUnitRenderAction_OutputIsSilence);
+    for (unsigned i = 1; i <= 128; ++i) CHECK(out[i] == 128);
+    CHECK(out[0] == 0xaa && out[129] == 0xaa);
+    CHECK(position(h) == 64 && s->play_pos == 0 && s->underruns == 1);
+    CHECK(get(h, 16, &data) == S_OK); memset(data, 37, 32); CHECK(put(h, 16, 0) == S_OK);
+    flags = 0; CHECK(render(s, 64, out + 1, 128, &flags) == noErr);
+    CHECK(!(flags & kAudioUnitRenderAction_OutputIsSilence));
+    for (unsigned i = 1; i <= 128; ++i) CHECK(out[i] == (i <= 32 ? 37 : 128));
+    CHECK(position(h) == 128 && s->play_pos == 16 && s->underruns == 2 && ios_padding(s) == 0);
+    CHECK(stop(h) == S_OK && stop(h) == S_FALSE);
+    atomic_fetch_add(&fake_ticks, 24000000); CHECK(position(h) == 128);
+    CHECK(start(h) == S_OK);
+    CHECK(render(s, 64, out + 1, 128, NULL) == noErr && position(h) == 192);
+    CHECK(stop(h) == S_OK);
+    fail_start = 1; CHECK(start(h) == S_OK && !s->au); fail_start = 0;
+    CHECK(position(h) == 192); atomic_fetch_add(&fake_ticks, 24000000);
+    CHECK(position(h) == 48192); CHECK(stop(h) == S_OK);
+    CHECK(reset(h) == S_OK && position(h) == 0 && s->underruns == 0);
+    release(h);
+}
+static int32_t read_integer(const BYTE *sample, unsigned bits) {
+    if (bits == 8) return sample[0] - 128;
+    if (bits == 16) { int16_t v; memcpy(&v, sample, 2); return v; }
+    if (bits == 24) {
+        int32_t v = sample[0] | (sample[1] << 8) | (sample[2] << 16);
+        return v & 0x800000 ? v - 0x1000000 : v;
+    }
+    int32_t v; memcpy(&v, sample, 4); return v;
+}
+static void write_integer(BYTE *sample, unsigned bits, int32_t value) {
+    if (bits == 8) { sample[0] = (BYTE)(value + 128); return; }
+    uint32_t v = (uint32_t)value;
+    for (unsigned i = 0; i < bits / 8; ++i) sample[i] = (BYTE)(v >> (8 * i));
+}
+static void volume_contract(void) {
+    for (unsigned bits = 8; bits <= 32; bits += 8) {
+        for (unsigned channels = 1; channels <= 2; ++channels) {
+            struct WAVEFORMATEX_stub f = format(bits, channels, 48000, 1);
+            stream_handle h = create(&f, 0); struct ios_stream *s = stream_from_handle(h);
+            CHECK(atomic_is_lock_free(&s->gain_bits[0]) && atomic_is_lock_free(&s->clock_frames));
+            int32_t minimum = bits == 32 ? INT32_MIN : -(1 << (bits - 1));
+            int32_t maximum = bits == 32 ? INT32_MAX : (1 << (bits - 1)) - 1;
+            int32_t values[] = {minimum, maximum, -1, 0, 1, minimum / 2, maximum / 2};
+            enum { FRAMES = 7 };
+            BYTE *data, out[FRAMES * 8 + 2];
+            CHECK(get(h, FRAMES, &data) == S_OK);
+            for (unsigned n = 0; n < FRAMES; ++n) for (unsigned ch = 0; ch < channels; ++ch)
+                write_integer(data + n * f.nBlockAlign + ch * bits / 8, bits, values[n]);
+            CHECK(put(h, FRAMES, 0) == S_OK);
+            /* Volume is applied at consumption, including packets queued before the change. */
+            float channel_gains[2] = {0.5f, 1}, session_gains[2] = {1, 0.5f};
+            set_volume(h, 0.5f, channel_gains, session_gains);
+            memset(out, 0xcc, sizeof(out));
+            CHECK(render(s, FRAMES, out + 1, FRAMES * f.nBlockAlign, NULL) == noErr);
+            for (unsigned n = 0; n < FRAMES; ++n) for (unsigned ch = 0; ch < channels; ++ch)
+                CHECK(read_integer(out + 1 + n * f.nBlockAlign + ch * bits / 8, bits) ==
+                      (int32_t)(values[n] * 0.25));
+            CHECK(out[0] == 0xcc && out[1 + FRAMES * f.nBlockAlign] == 0xcc);
+            for (unsigned round = 0; round < 4; ++round) {
+                CHECK(get(h, FRAMES, &data) == S_OK);
+                memset(data, 0xff, FRAMES * f.nBlockAlign); CHECK(put(h, FRAMES, 0) == S_OK);
+                float gains[] = {0, -1, NAN, INFINITY}; set_volume(h, gains[round], NULL, NULL);
+                AudioUnitRenderActionFlags flags = 0;
+                CHECK(render(s, FRAMES, out + 1, FRAMES * f.nBlockAlign, &flags) == noErr);
+                CHECK(flags & kAudioUnitRenderAction_OutputIsSilence);
+                for (unsigned i = 0; i < FRAMES * f.nBlockAlign; ++i) CHECK(out[1 + i] == s->silence_byte);
+            }
+            set_volume(h, 2, NULL, NULL); // clamp; unity remains bit-exact
+            CHECK(get(h, FRAMES, &data) == S_OK);
+            for (unsigned i = 0; i < FRAMES * f.nBlockAlign; ++i) data[i] = (BYTE)(i * 37);
+            BYTE expected[FRAMES * 8]; memcpy(expected, data, FRAMES * f.nBlockAlign);
+            CHECK(put(h, FRAMES, 0) == S_OK);
+            CHECK(render(s, FRAMES, out + 1, FRAMES * f.nBlockAlign, NULL) == noErr);
+            CHECK(!memcmp(out + 1, expected, FRAMES * f.nBlockAlign));
+            release(h);
+        }
+    }
+    struct WAVEFORMATEX_stub f = format(32, 2, 48000, 3);
+    stream_handle h = create(&f, 0); struct ios_stream *s = stream_from_handle(h);
+    float values[] = {1, -1, 0.5f, -0.5f, NAN, INFINITY}; BYTE *data;
+    CHECK(get(h, 3, &data) == S_OK); memcpy(data, values, sizeof(values)); CHECK(put(h, 3, 0) == S_OK);
+    float gains[] = {0.5f, 0}; set_volume(h, 1, gains, NULL);
+    BYTE output[sizeof(values) + 1]; CHECK(render(s, 3, output + 1, sizeof(values), NULL) == noErr);
+    float result[6]; memcpy(result, output + 1, sizeof(result));
+    CHECK(result[0] == 0.5f && result[1] == 0 && result[2] == 0.25f && result[3] == 0);
+    CHECK(result[4] == 0 && result[5] == 0);
+    release(h);
+}
+
+/* The production producer and callback run concurrently. Each frame carries
+ * a 32-bit sequence number in two PCM16 channels; check no loss, duplication,
+ * tearing or reordering across repeated ring wraps and arbitrary packet sizes. */
+struct stress_context { struct ios_stream *s; stream_handle handle; uint32_t frames; };
+static void *stress_producer(void *arg) {
+    struct stress_context *ctx = arg; uint32_t next = 1;
+    while (next <= ctx->frames) {
+        uint32_t count = (next * 17u % 197u) + 1;
+        if (count > ctx->frames + 1 - next) count = ctx->frames + 1 - next;
+        BYTE *data; HRESULT hr = get(ctx->handle, count, &data);
+        if (hr == AUDCLNT_E_BUFFER_TOO_LARGE) { sched_yield(); continue; }
+        assert(hr == S_OK);
+        for (unsigned i = 0; i < count; ++i) { uint32_t value = next + i; memcpy(data + 4 * i, &value, 4); }
+        assert(put(ctx->handle, count, 0) == S_OK); next += count;
+    }
+    return NULL;
+}
+static void concurrent_ring(void) {
+    struct WAVEFORMATEX_stub f = format(16, 2, 48000, 1);
+    stream_handle h = create(&f, 0); struct ios_stream *s = stream_from_handle(h);
+    struct stress_context ctx = {s, h, 1000000};
+    pthread_t producer; CHECK(pthread_create(&producer, NULL, stress_producer, &ctx) == 0);
+    uint32_t next = 1; uint64_t rendered = 0;
+    while (next <= ctx.frames) {
+        uint32_t count = (next * 13u % 251u) + 1, output[251];
+        uint64_t before = s->play_pos;
+        CHECK(render(s, count, output, sizeof(output), NULL) == noErr);
+        unsigned copied = (unsigned)(s->play_pos - before);
+        CHECK(copied <= count);
+        for (unsigned i = 0; i < copied; ++i) CHECK(output[i] == next++);
+        for (unsigned i = copied; i < count; ++i) CHECK(output[i] == 0);
+        rendered += count;
+        if (!copied) sched_yield();
+    }
+    CHECK(pthread_join(producer, NULL) == 0);
+    CHECK(s->play_pos == ctx.frames && s->write_pos == ctx.frames && ios_padding(s) == 0);
+    CHECK(s->clock_frames == rendered);
+    release(h);
+}
+
 int main(void) {
     ios_process_attach(NULL);
     CHECK(sizeof(audio_null_ios_unix_call_funcs) / sizeof(void *) == 37);
     formats(); buffer_contract(); failures(); timer_lifetime();
+    callback_contract(); volume_contract(); concurrent_ring();
     CHECK(live_units() == 0);
     for (unsigned i = 0; i < IOS_MAX_STREAMS; ++i) CHECK(g_streams[i] == NULL);
     printf("Audio driver contracts: %lu checks passed (Apple/Nt boundaries mocked)\n", checks);
