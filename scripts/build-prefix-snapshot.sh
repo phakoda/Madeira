@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$REPO_ROOT/app/Madeira/prefix-template.tar.gz"
 
-WORK_DIR="$(mktemp -d /Users/"$USER"/madeira-prefix-build.XXXXXX)"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/madeira-prefix-build.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 PREFIX="$WORK_DIR/prefix"
 
@@ -25,8 +25,20 @@ if [[ ! -x "$WINE_BIN" ]]; then
     exit 1
 fi
 
+if [[ ! -x "$WINEBOOT_BIN" ]]; then
+    echo "error: wineboot not found at $WINEBOOT_BIN (override with WINEBOOT=...)" >&2
+    exit 1
+fi
+
 echo "==> Running wineboot --init in $PREFIX"
-WINEPREFIX="$PREFIX" WINEDEBUG=-all "$WINEBOOT_BIN" --init 2>&1 | tail -5 || true
+if WINEPREFIX="$PREFIX" WINEDEBUG=-all "$WINEBOOT_BIN" --init > "$WORK_DIR/wineboot.log" 2>&1; then
+    tail -5 "$WORK_DIR/wineboot.log"
+else
+    status=$?
+    cat "$WORK_DIR/wineboot.log" >&2
+    echo "error: wineboot failed (exit $status); existing template left untouched" >&2
+    exit "$status"
+fi
 
 if [[ ! -f "$PREFIX/.update-timestamp" ]]; then
     echo "error: wineboot did not produce .update-timestamp" >&2
@@ -87,8 +99,18 @@ echo "==> Post-strip contents:"
 du -sh "$PREFIX"
 find "$PREFIX" -maxdepth 3 -type d | sort
 
-echo "==> Creating tarball: $OUTPUT"
-tar -C "$WORK_DIR" -czf "$OUTPUT" prefix
+echo "==> Creating and validating candidate template"
+CANDIDATE="$WORK_DIR/prefix-template.tar.gz"
+# Avoid host metadata sidecars and test the exact bytes we will publish.
+COPYFILE_DISABLE=1 tar -C "$WORK_DIR" -czf "$CANDIDATE" prefix
+"$REPO_ROOT/tools/check-prefix-template.sh" "$CANDIDATE"
+# Destination-local temporary file makes publication an atomic rename even
+# when TMPDIR and the checkout live on different volumes.
+PUBLISH="$(mktemp "$OUTPUT.new.XXXXXX")"
+trap 'rm -rf "$WORK_DIR"; rm -f "$PUBLISH"' EXIT
+cp "$CANDIDATE" "$PUBLISH"
+chmod 644 "$PUBLISH"
+mv -f "$PUBLISH" "$OUTPUT"
 ls -lh "$OUTPUT"
 
 echo "==> Done."

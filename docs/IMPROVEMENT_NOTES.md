@@ -263,3 +263,33 @@ a small fixed strip of possible game area for controls that cannot be covered
 by a widescreen swapchain. The game itself still aspect-fits its actual drawable;
 no stretch/crop, render-resolution rewrite, or extra per-frame layout loop was
 introduced. This UI arrangement is syntax-validated, not screenshot/device-tested.
+
+## Reproducible validation and fail-closed tooling
+
+Added project reference/source-membership checks (all 17 production Swift files)
+and grammar parsing of every Swift source. `tests/typecheck-ios.sh` is a separate
+Apple-SDK semantic check, deliberately failing with a clear prerequisite message
+on Linux; it does not claim to link the app. The existing UI uses iOS 26 SDK
+symbols even though the app deployment setting is iOS 17, so this check requires
+an iPhoneOS 26-or-newer SDK. Native translation/graphics dependencies and device
+execution remain separate requirements.
+
+The remote-Metal integration runner now requires an explicitly selected host,
+uses a private temporary build directory, preflights pinned DXMT headers,
+rebuilds each test and propagates the actual test/compiler failure status while
+showing full failure output. It no longer silently targets a developer's LAN
+address or hides failures behind tail/sed. **17 offline runner checks passed**
+using a fake compiler/test program. They exercise the runner, NOT Metal or the
+missing DXMT packer/client; the full integration suite was not executed.
+
+The shipping-template check now compiles/runs the production prefix installer
+and readiness gate instead of treating a failed tar pipeline as no bad links.
+It rejects every link type the runtime rejects, as well as corrupt archives and
+missing essential files. Snapshot creation now propagates wineboot failure,
+validates a candidate before publication and atomically renames a destination-
+local copy, preserving the existing template on early failures. Existing registry
+normalization rules are unchanged; a newly generated archive containing other
+unsupported entries must be corrected rather than bypassing validation.
+**7 wrapper checks passed**, including the real shipped template, corrupt input,
+and a stubbed failing wineboot that created its marker before exiting. A complete
+Wine/macOS snapshot rebuild was not performed here.
