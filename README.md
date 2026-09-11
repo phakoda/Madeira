@@ -7,7 +7,16 @@ Madeira combines [Wine](https://www.winehq.org/) (ARM64EC),
 [DXMT](https://github.com/3Shain/DXMT) for D3D11 → Metal, running as a single
 Mach process on iOS with wineserver as a thread rather than a separate process.
 
-## Status
+## Source improvement pass
+
+The `improvements/ios-stability` branch preserves the supplied history and adds
+input, display/compositor, logging, prefix-installation, allocation and validation
+changes. Start with [the verification report](docs/VERIFICATION.md) and
+[implementation notes](docs/IMPROVEMENT_NOTES.md). Run the host regression suite
+with `bash tests/run-portable.sh`; [device checks](docs/DEVICE_VALIDATION.md) remain
+separate. This archive is a source update, not a newly built/device-tested IPA.
+
+## Upstream status (from the supplied snapshot)
 
 Thumper and ULTRAKILL are playable. Marvel Cosmic Invasion has reached
 gameplay, though a run has also ended in an unexplained termination and its

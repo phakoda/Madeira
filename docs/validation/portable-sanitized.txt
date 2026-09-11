@@ -1,0 +1,18 @@
+Project references and source membership: passed (17 Swift files)
+wire round-trip, version 1, 15 record types
+  packed 15 records, 440 record bytes, 96 sidecar bytes
+malformed input
+decoder validation
+
+63 checks, 0 failures
+Input queue: 200991 checks passed
+Surface layout/mailbox: 20157 checks passed
+Geometry/input ownership: 10026 checks passed
+Logging: 1061 checks passed (64,000 concurrent events; 1,000 concurrent file appends)
+Prefix installation: 850 checks passed (174 fixtures; 138 shipped members compared)
+Frame-rate sampling: 110208 checks passed
+Checked arena: 148025 checks passed (128,000 allocations on 32 threads)
+Controller/keyboard: 121928 checks passed
+Remote runner: 17 offline checks passed (not a Metal integration run)
+Template tools: 7 checks passed (Wine was stubbed only for the failure test)
+Portable suites passed.
