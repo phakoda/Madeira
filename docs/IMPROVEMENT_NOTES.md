@@ -86,3 +86,29 @@ or App Store compatibility; its device behavior still needs A/B validation.
 
 Portable Swift tests: **10,026 geometry and input-ownership checks passed**.
 UIKit source was syntax-parsed, not SDK-typechecked or device-tested.
+
+## Desktop/GDI compositor
+
+The real compositor now uses a tested full-surface mailbox: one pending immutable
+frame per HWND, with dimensions/stride traveling together with the pixels. A
+new frame replaces a superseded complete image, rather than allocating another
+main-queue presentation closure. Main-queue tickets distinguish window reuse;
+destroy invalidates the old pending frame before enqueueing removal. This relies
+on Wine's normal contract that no new flush is issued for a destroyed window.
+The queue is bounded to 64 pending HWNDs and 128 MiB of pending DIB data, with
+power-of-two pressure reports. These are queue resource limits, **not** an iOS
+jetsam estimate or a limit on all live textures or transient copies.
+
+Image dimensions, row alignment, row capacity, overflow, and the byte ceiling are
+checked before copying. Wine producer calls now own an autorelease pool. Ordinary
+frames bypass diagnostic hashing/census/tree work entirely. The main-thread path
+uses a cached sRGB color space, honors opaque BGRX semantics, disables implicit
+contents/geometry animation, and clears all window-associated metadata on destroy.
+Cursor placement is recalculated when the desktop layout changes. No speculative
+alpha reinterpretation, GPU fast-math change, or shader-output hack was applied.
+
+Portable production-policy result: **20,157 surface layout/mailbox checks passed**
+under ASan/UBSan, including 10,000 successive frames for one HWND, pending-window
+reuse, stale tasks, budget exhaustion/recovery, and malformed layouts. Actual
+Core Animation/Metal output, color fidelity, and GPU timing require the device
+checks below; they cannot be certified by these host-side tests.

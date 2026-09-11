@@ -30,6 +30,8 @@
 #include <sys/time.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <math.h>
+#include "SurfaceQueue.h"
 
 /* csops syscall — CS_DEBUGGED is the flag StikDebug JIT rides on. Declared by
  * hand for the same reason JITAllocator.c does: <sys/codesign.h> is not in the
@@ -568,6 +570,57 @@ static NSMutableDictionary<NSNumber *, NSValue *> *g_surf_sizes; /* hwnd → sur
 static NSMutableDictionary<NSNumber *, CAMetalLayer *> *g_metal_layers; /* hwnd → DXMT layer */
 static NSMutableDictionary<NSNumber *, NSValue *> *g_client_rects;      /* hwnd → client px rect */
 static void winios_place_metal_layer(NSNumber *key);
+static void winios_cursor_place(void);
+static madeira_surface_queue g_surface_queue;
+static pthread_mutex_t g_surface_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_surface_diag_lock = PTHREAD_MUTEX_INITIALIZER;
+static void winios_present_queued(HWND hwnd, uint64_t ticket);
+
+static NSDictionary *winios_no_animation_actions(void) {
+    static NSDictionary *actions;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        actions = @{ @"contents": [NSNull null], @"contentsRect": [NSNull null],
+                     @"bounds": [NSNull null], @"position": [NSNull null],
+                     @"hidden": [NSNull null], @"sublayers": [NSNull null] };
+    });
+    return actions;
+}
+
+static int winios_desktop_dimension(const char *name, int fallback) {
+    const char *value = getenv(name);
+    if (!value || !*value) return fallback;
+    char *end = NULL;
+    long parsed = strtol(value, &end, 10);
+    return end && !*end && parsed > 0 && parsed <= MADEIRA_SURFACE_DIMENSION
+        ? (int)parsed : fallback;
+}
+
+/* Keep one complete immutable DIB per pending HWND. Copying is required: Wine
+ * may reuse its surface as soon as the native call returns. Never queue dirty
+ * rectangles independently, or dropping an intermediate frame loses damage. */
+static void winios_queue_surface(HWND hwnd, NSData *data, int sw, int sh, int stride) {
+    madeira_surface_frame frame = { .key = (uintptr_t)hwnd, .bytes = data.length,
+        .width = sw, .height = sh, .stride = stride,
+        .payload = (void *)CFBridgingRetain(data) };
+    void *retired = NULL;
+    uint64_t ticket = 0;
+    pthread_mutex_lock(&g_surface_lock);
+    bool accepted = madeira_surface_push(&g_surface_queue, frame, &retired, &ticket);
+    if (accepted && ticket) {
+        dispatch_async(dispatch_get_main_queue(), ^{ winios_present_queued(hwnd, ticket); });
+    }
+    uint64_t rejected = g_surface_queue.rejected;
+    pthread_mutex_unlock(&g_surface_lock);
+    if (retired) CFRelease((CFTypeRef)retired);
+    if (!accepted) {
+        CFRelease((CFTypeRef)frame.payload);
+        // Log at powers of two, not once per rejected frame under pressure.
+        if (rejected && !(rejected & (rejected - 1)))
+            fprintf(stderr, "[winios] surface queue pressure: %llu rejected frames\n",
+                    (unsigned long long)rejected);
+    }
+}
 
 /* Surfaces are 128px-aligned (win32u), usually LARGER than the window.
  * Crop the layer contents to the window's actual size or everything
@@ -600,12 +653,12 @@ static void winios_layout_compositor(void) {
     if (!g_compositor_view) return;
     UIWindow *win = g_compositor_view.superview ? (UIWindow *)g_compositor_view.superview : nil;
     CGRect frame = g_comp_frame_set ? g_comp_frame : (win ? win.bounds : g_compositor_view.frame);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     g_compositor_view.frame = frame;
 
-    const char *dw = getenv("MADEIRA_SCREEN_W"), *dh = getenv("MADEIRA_SCREEN_H");
-    int desk_w = dw ? atoi(dw) : 1024, desk_h = dh ? atoi(dh) : 768;
-    if (desk_w <= 0) desk_w = 1024;
-    if (desk_h <= 0) desk_h = 768;
+    int desk_w = winios_desktop_dimension("MADEIRA_SCREEN_W", 1024);
+    int desk_h = winios_desktop_dimension("MADEIRA_SCREEN_H", 768);
     CGFloat s = MIN(frame.size.width / desk_w, frame.size.height / desk_h);
     CGSize fit = CGSizeMake(desk_w * s, desk_h * s);
     g_px_to_pt = s;
@@ -621,15 +674,17 @@ static void winios_layout_compositor(void) {
                                            (int)r.size.width, (int)r.size.height);
         winios_place_metal_layer(key);
     }
-    fprintf(stderr, "[winios] compositor layout: frame=(%.0f,%.0f %.0fx%.0f) desk=%dx%d px_to_pt=%.3f\n",
+    winios_cursor_place();
+    [CATransaction commit];
+    if (madeira_get_diag_enabled()) fprintf(stderr, "[winios] compositor layout: frame=(%.0f,%.0f %.0fx%.0f) desk=%dx%d px_to_pt=%.3f\n",
             frame.origin.x, frame.origin.y, frame.size.width, frame.size.height,
             desk_w, desk_h, (double)g_px_to_pt);
-    fflush(stderr);
 }
 
 /* Called from Swift (MetalBackedView) with the presentation area in
  * window coordinates — same geometry contract as the Metal host view. */
 void winios_set_compositor_frame(double x, double y, double w, double h) {
+    if (!isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h) || w < 0 || h < 0) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         CGRect f = CGRectMake(x, y, w, h);
         /* layoutSubviews storms identical frames — skip no-op relayouts */
@@ -663,6 +718,7 @@ static void winios_ensure_compositor(void) {
      * explorer's own background paint works) */
     g_compositor_view.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
     g_desk_bg = [CALayer layer];
+    g_desk_bg.actions = winios_no_animation_actions();
     g_desk_bg.backgroundColor = [UIColor colorWithRed:0.0 green:0.502 blue:0.502 alpha:1.0].CGColor;
     [g_compositor_view.layer addSublayer:g_desk_bg];
     [win addSubview:g_compositor_view];
@@ -689,6 +745,8 @@ static CALayer *winios_layer_for(HWND hwnd, bool create) {
     CALayer *l = g_layers[key];
     if (!l && create) {
         l = [CALayer layer];
+        l.actions = winios_no_animation_actions();
+        l.masksToBounds = YES;
         l.anchorPoint = CGPointMake(0, 0);
         l.magnificationFilter = kCAFilterNearest;
         l.opaque = YES;
@@ -702,24 +760,25 @@ static CALayer *winios_layer_for(HWND hwnd, bool create) {
 }
 
 static void winios_remove_layer(HWND hwnd) {
+    // Invalidate the pending ticket before enqueuing destruction. New work for
+    // a reused HWND is enqueued AFTER destruction, never consumed by its old task.
+    pthread_mutex_lock(&g_surface_lock);
+    void *retired = madeira_surface_invalidate(&g_surface_queue, (uintptr_t)hwnd);
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!g_layers) return;
         NSNumber *key = @((uintptr_t)hwnd);
-        CALayer *l = g_layers[key];
-        if (l) {
-            [l removeFromSuperlayer];
-            [g_layers removeObjectForKey:key];
-            [g_px_rects removeObjectForKey:key];
-        }
-        CAMetalLayer *ml = g_metal_layers[key];
-        if (ml) {
-            [ml removeFromSuperlayer];
-            [g_metal_layers removeObjectForKey:key];
-            [g_client_rects removeObjectForKey:key];
-            fprintf(stderr, "[winios] metal layer removed for hwnd=%p\n", hwnd);
-            fflush(stderr);
-        }
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        [g_layers[key] removeFromSuperlayer];
+        [g_metal_layers[key] removeFromSuperlayer];
+        [g_layers removeObjectForKey:key];
+        [g_px_rects removeObjectForKey:key];
+        [g_surf_sizes removeObjectForKey:key];
+        [g_metal_layers removeObjectForKey:key];
+        [g_client_rects removeObjectForKey:key];
+        [CATransaction commit];
     });
+    pthread_mutex_unlock(&g_surface_lock);
+    if (retired) CFRelease((CFTypeRef)retired);
 }
 
 /* ============================================================ *
@@ -763,6 +822,7 @@ CAMetalLayer *winios_metal_layer_for_hwnd(void *hwnd) {
         if (!ml) {
             CALayer *win = winios_layer_for(hwnd, true);
             ml = [CAMetalLayer layer];
+            ml.actions = winios_no_animation_actions();
             ml.anchorPoint = CGPointMake(0, 0);
             ml.device = MTLCreateSystemDefaultDevice();
             ml.pixelFormat = MTLPixelFormatBGRA8Unorm;
@@ -916,7 +976,8 @@ static volatile int wph_pair_n;
 void winios_dump_srcbits(const void *bits, int w, int h, int stride) {
     static int on = -1;
     if (on < 0) on = getenv("MADEIRA_DUMP_SURFACES") != NULL;
-    if (!on || !bits || w <= 0 || h <= 0 || stride < w * 4) return;
+    size_t bytes;
+    if (!on || !bits || !madeira_surface_layout(w, h, stride, &bytes)) return;
     if (wph_pair) return;              /* a pair is already awaiting its surface */
     /* ml542: was 12. Sample size is now the binding constraint on the render
      * hunt: 9 captured frames yielded exactly ONE clear instance of the defect
@@ -928,7 +989,7 @@ void winios_dump_srcbits(const void *bits, int w, int h, int stride) {
     if (wph_pair_n >= 120) return;
     @autoreleasepool {
         int id = ++wph_pair_n;
-        NSData *d = [NSData dataWithBytes:bits length:(size_t)stride * h];
+        NSData *d = [NSData dataWithBytes:bits length:bytes];
         winios_dump_surface_named(d, w, h, stride,
             [NSString stringWithFormat:@"pair-%03d-SRC-%dx%d.png", id, w, h]);
         dprintf(STDERR_FILENO,
@@ -942,8 +1003,24 @@ void winios_dump_srcbits(const void *bits, int w, int h, int stride) {
  * whole DIB. Copy immediately — `bits` is only valid for this call. */
 void winios_surface_present(HWND hwnd, int dx, int dy, int dw, int dh,
                             int sw, int sh, int stride, const void *bits) {
-    if (sw <= 0 || sh <= 0 || !bits) return;
-    NSData *data = [NSData dataWithBytes:bits length:(size_t)stride * sh];
+    size_t bytes;
+    if (!hwnd || !bits || !madeira_surface_layout(sw, sh, stride, &bytes)) return;
+    @autoreleasepool {
+    NSData *data = [NSData dataWithBytes:bits length:bytes];
+    if (!data) return;
+    // Most frames need no diagnostic hashing, census, counters, or flushing.
+    // Explicit dump/sentinel tools remain opt-in independently of the UI toggle.
+    static int explicitDiagnostics;
+    static dispatch_once_t diagnosticOnce;
+    dispatch_once(&diagnosticOnce, ^{
+        explicitDiagnostics = getenv("MADEIRA_DUMP_SURFACES") != NULL ||
+            getenv("MADEIRA_SURF_SEQ") != NULL || getenv("MADEIRA_SURF_SENTINEL") != NULL;
+    });
+    if (!madeira_get_diag_enabled() && !explicitDiagnostics) {
+        winios_queue_surface(hwnd, data, sw, sh, stride);
+        return;
+    }
+    pthread_mutex_lock(&g_surface_diag_lock);
     static int dumpSurf = -1;
     if (dumpSurf < 0) dumpSurf = getenv("MADEIRA_DUMP_SURFACES") != NULL;
     /* ml537: complete an armed src/surface pair with the FIRST present after the
@@ -1138,31 +1215,49 @@ void winios_surface_present(HWND hwnd, int dx, int dy, int dw, int dh,
                 hwnd, mycnt, dx, dy, dw, dh, sw, sh, bits, sig);
         fflush(stderr);
     }
-    dispatch_async(dispatch_get_main_queue(), ^{
-        winios_ensure_compositor();
-        if (!g_compositor_view) return;
+    pthread_mutex_unlock(&g_surface_diag_lock);
+    winios_queue_surface(hwnd, data, sw, sh, stride);
+    } // autoreleasepool: Wine threads do not necessarily provide one
+}
+
+/* Main-thread consumer. A superseded frame's metadata and pixels are taken
+ * together, so a resize cannot interpret the new DIB with an old row stride. */
+static void winios_present_queued(HWND hwnd, uint64_t ticket) {
+    madeira_surface_frame frame;
+    pthread_mutex_lock(&g_surface_lock);
+    bool found = madeira_surface_take(&g_surface_queue, (uintptr_t)hwnd, ticket, &frame);
+    pthread_mutex_unlock(&g_surface_lock);
+    if (!found) return;
+    NSData *data = CFBridgingRelease((CFTypeRef)frame.payload);
+    winios_ensure_compositor();
+    if (!g_compositor_view) return;
+    static CGColorSpaceRef cs;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB); });
+    if (!cs) return;
+    CGDataProviderRef dp = CGDataProviderCreateWithCFData((__bridge CFDataRef)data);
+    if (!dp) return;
+    // GDI uses BGRX, not premultiplied BGRA. Never reinterpret its spare byte
+    // as alpha to hide black pixels: that discards legitimate opaque content.
+    CGImageRef img = CGImageCreate(frame.width, frame.height, 8, 32, frame.stride, cs,
+                                   kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst,
+                                   dp, NULL, false, kCGRenderingIntentDefault);
+    if (img) {
         CALayer *l = winios_layer_for(hwnd, true);
-        CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-        CGDataProviderRef dp = CGDataProviderCreateWithCFData((__bridge CFDataRef)data);
-        /* GDI 32bpp DIB = BGRX little-endian, no alpha */
-        CGImageRef img = CGImageCreate(sw, sh, 8, 32, stride, cs,
-                                       kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst,
-                                       dp, NULL, false, kCGRenderingIntentDefault);
-        if (img) {
-            NSNumber *key = @((uintptr_t)hwnd);
-            l.contents = (__bridge id)img;
-            g_surf_sizes[key] = [NSValue valueWithCGSize:CGSizeMake(sw, sh)];
-            if (CGRectIsEmpty(l.frame)) {
-                /* frame not delivered yet — place at surface size */
-                g_px_rects[key] = [NSValue valueWithCGRect:CGRectMake(0, 0, sw, sh)];
-                l.frame = winios_layer_rect(0, 0, sw, sh);
-            }
-            winios_apply_contents_rect(key, l);
-            CGImageRelease(img);
+        NSNumber *key = @((uintptr_t)hwnd);
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        l.contents = (__bridge id)img;
+        g_surf_sizes[key] = [NSValue valueWithCGSize:CGSizeMake(frame.width, frame.height)];
+        if (CGRectIsEmpty(l.frame)) {
+            g_px_rects[key] = [NSValue valueWithCGRect:CGRectMake(0, 0, frame.width, frame.height)];
+            l.frame = winios_layer_rect(0, 0, frame.width, frame.height);
         }
-        CGDataProviderRelease(dp);
-        CGColorSpaceRelease(cs);
-    });
+        winios_apply_contents_rect(key, l);
+        [CATransaction commit];
+        CGImageRelease(img);
+    }
+    CGDataProviderRelease(dp);
 }
 
 /* ============================================================ *
@@ -1207,6 +1302,7 @@ static void winios_ensure_cursor_layer(void) {
     if (g_cursor_layer || !g_compositor_view) return;
     UIImage *img = winios_cursor_image();
     g_cursor_layer = [CALayer layer];
+    g_cursor_layer.actions = winios_no_animation_actions();
     g_cursor_layer.zPosition = 10000;   /* above every window layer */
     g_cursor_layer.anchorPoint = CGPointMake(0, 0);
     g_cursor_layer.contents = (id)img.CGImage;
