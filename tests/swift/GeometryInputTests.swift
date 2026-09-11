@@ -56,7 +56,7 @@ import Foundation
         check(events.count == count)
         input.set(.key(-1), down: true, source: a)
         input.set(.key(256), down: true, source: a)
-        input.set(.mouse(3), down: true, source: a)
+        input.set(.mouse(5), down: true, source: a)
         check(events.count == count)
         // Thousands of overlapping ownership transitions, checked against a model.
         var model: Set<UUID> = []

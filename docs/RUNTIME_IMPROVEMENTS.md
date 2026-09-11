@@ -78,3 +78,30 @@ references. The 37-entry dispatch ordering and audio parameter structures were
 also inspected against the pinned Wine `dlls/mmdevapi/unixlib.h` at
 `7817e220384e895651f868ba4d97affcf21b3816`. The tests' Apple declarations are
 boundary mocks, not a substitute for compiling with the genuine Apple SDK.
+
+
+## Opt-in physical mouse input
+
+The input menu now includes physical mouse capture and sensitivity. Capture is
+restricted to a pointer hovering inside the active guest surface, not host
+controls or a presented modal. It uses the existing absolute/relative pointer
+mode and public GCMouse handlers. This does **not** lock the OS pointer: moving
+outside the guest releases capture, and unrestricted FPS camera movement still
+needs a separately validated pointer-lock host implementation.
+
+Implemented left/right/middle and the first two auxiliary buttons, horizontal
+and vertical wheels, finite/saturating fractional motion accumulation, and
+source ownership shared with touch/controller input. Disconnect, background,
+modal entry, view replacement, leaving the surface and disabling the feature
+invalidate old callback generations and release only their own held buttons.
+Native indirect-pointer touches are not duplicated as touch taps during capture.
+No polling/display-link timer was added to mouse input; it uses device callbacks
+and the display's existing lifecycle check.
+
+The real production bridge is typechecked and executed against small test-only
+UIKit/GameController/Combine boundary modules. Its suite passes 200,044 checks,
+including 100,000 conservation-of-motion steps, focus/rotation/disconnect,
+multiple-mouse ownership, stale callback rejection, side-button payloads and
+fractional wheel input. These tests do not certify Apple's real API availability,
+UIKit hover ordering, external hardware or OS pointer behavior. Use the genuine
+Apple-SDK typecheck and device matrix before distribution.

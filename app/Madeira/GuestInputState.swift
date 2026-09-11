@@ -6,11 +6,11 @@ import Foundation
 final class GuestInputState {
     enum Control: Hashable {
         case key(Int32)
-        case mouse(Int) // 0 = left, 1 = right, 2 = middle
+        case mouse(Int) // 0 = left, 1 = right, 2 = middle, 3/4 = X1/X2
         var valid: Bool {
             switch self {
             case .key(let vk): return (1...255).contains(vk)
-            case .mouse(let button): return (0...2).contains(button)
+            case .mouse(let button): return (0...4).contains(button)
             }
         }
     }
@@ -65,7 +65,11 @@ final class GuestInput {
             case .key(let vk): winios_post_key(vk, down ? 1 : 0)
             case .mouse(let button):
                 let flags: [(UInt32, UInt32)] = [(0x2, 0x4), (0x8, 0x10), (0x20, 0x40)]
-                winios_pointer(0, 0, down ? flags[button].0 : flags[button].1, 0)
+                if button < 3 {
+                    winios_pointer(0, 0, down ? flags[button].0 : flags[button].1, 0)
+                } else {
+                    winios_pointer(0, 0, down ? 0x80 : 0x100, 1 << UInt32(button - 3))
+                }
             }
         }
         observer = NotificationCenter.default.addObserver(

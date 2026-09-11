@@ -62,6 +62,8 @@
 		A100020A /* HardwareKeyboardState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200020A /* HardwareKeyboardState.swift */; };
 		A100020B /* PhysicalControllerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200020B /* PhysicalControllerBridge.swift */; };
 		A100020C /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A200020C /* GameController.framework */; };
+		A100020D /* PointerMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200020D /* PointerMotion.swift */; };
+		A100020E /* PhysicalMouseBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200020E /* PhysicalMouseBridge.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -131,6 +133,8 @@
 		A200020A /* HardwareKeyboardState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HardwareKeyboardState.swift"; sourceTree = "<group>"; };
 		A200020B /* PhysicalControllerBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PhysicalControllerBridge.swift"; sourceTree = "<group>"; };
 		A200020C /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
+		A200020D /* PointerMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PointerMotion.swift"; sourceTree = "<group>"; };
+		A200020E /* PhysicalMouseBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PhysicalMouseBridge.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -186,6 +190,8 @@
 				A2000201 /* LogTail.swift */,
 				A2000202 /* FPSOverlay.swift */,
 				A200020B /* PhysicalControllerBridge.swift */,
+				A200020E /* PhysicalMouseBridge.swift */,
+				A200020D /* PointerMotion.swift */,
 				A200020A /* HardwareKeyboardState.swift */,
 				A2000209 /* ControllerMath.swift */,
 				A2000208 /* FrameRateSampler.swift */,
@@ -345,6 +351,8 @@
 				A1000201 /* LogTail.swift in Sources */,
 				A1000202 /* FPSOverlay.swift in Sources */,
 				A100020B /* PhysicalControllerBridge.swift in Sources */,
+				A100020E /* PhysicalMouseBridge.swift in Sources */,
+				A100020D /* PointerMotion.swift in Sources */,
 				A100020A /* HardwareKeyboardState.swift in Sources */,
 				A1000209 /* ControllerMath.swift in Sources */,
 				A1000208 /* FrameRateSampler.swift in Sources */,

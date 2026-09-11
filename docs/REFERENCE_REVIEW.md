@@ -74,3 +74,39 @@ These references justify API/behavior choices, not successful execution on an
 Apple device. See VERIFICATION.md for the actual validation boundary. Check
 individual upstream contribution policies before submitting AI-assisted patches;
 this pass creates local commits only and does not propose upstream contributions.
+
+
+## Additional reads in the runtime-quality pass
+
+Re-read the supplied Melo-Controller joystick at commit
+`efe0373ede6ca4dc7d6533d7fa47ad52b4230fe8`; retained its zero-on-cancel behavior as a
+reference rather than adding a dependency. Rechecked Mythic's root metadata:
+its Wine/FEX pins differ from this archive and were not substituted blindly.
+
+Read UTM's `Platform/iOS/Display/VMDisplayMetalViewController+Pointer.m`, blob
+`b91c162848bad11755882ee6467d8b7d70c1f6ae`: GCMouse movement, Y-axis convention,
+button/auxiliary handlers, disconnect cleanup and UIKit pointer/scroll paths.
+The new bridge uses Madeira's own ownership and surface-scoped capture model;
+it does not copy UTM source or import its SPICE stack.
+
+Read the ring, converter and callback architecture in RetroArch's
+`audio/drivers/coreaudio.c` on its `master` branch:
+https://github.com/libretro/RetroArch/blob/master/audio/drivers/coreaudio.c
+The bounded-copy/no-realtime-log approach and separate consumed-frame counter
+are useful references. No RetroArch implementation was copied. This was a
+focused source read, not a benchmark against RetroArch or a full driver audit.
+
+Read the pinned Wine audio dispatch structures/order:
+https://github.com/willfaust/wine/blob/7817e220384e895651f868ba4d97affcf21b3816/dlls/mmdevapi/unixlib.h
+
+Microsoft's primary audio contracts were consulted for error/clock semantics:
+- https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudiorenderclient-getbuffer
+- https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudiorenderclient-releasebuffer
+- https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-reset
+- https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-start
+- https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-stop
+- https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclock-getposition
+
+Re-read Apple's WWDC20 session 10617 transcript and code for GCMouse callbacks,
+scrolling and the distinction between relative input and top-level controller
+pointer locking. The latter is explicitly not claimed by the new bridge.

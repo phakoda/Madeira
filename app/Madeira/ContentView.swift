@@ -57,7 +57,7 @@ final class MetalHostView: UIView {
 }
 
 // SwiftUI-hosted placeholder: geometry + touch input only.
-final class MetalBackedView: UIView, ControllerPointerTarget {
+final class MetalBackedView: UIView, MousePointerTarget {
     private static var layerRegistered = false
 
     // Hardware keyboard bridge: the view becomes first responder so the iOS
@@ -103,6 +103,15 @@ final class MetalBackedView: UIView, ControllerPointerTarget {
               window.windowScene?.activationState == .foregroundActive else { return false }
         return window.rootViewController?.presentedViewController == nil
     }
+    private var mouseInsideSurface = false
+    var mouseCaptureAllowed: Bool { controllerCaptureAllowed && mouseInsideSurface }
+    @objc private func pointerHovered(_ gesture: UIHoverGestureRecognizer) {
+        let inside = (gesture.state == .began || gesture.state == .changed) &&
+                     gameRect().contains(gesture.location(in: self))
+        guard mouseInsideSurface != inside else { return }
+        mouseInsideSurface = inside
+        PhysicalMouseBridge.shared.refreshCapture()
+    }
     func moveControllerPointer(dx: Int32, dy: Int32) {
         if InputSettings.shared.relative {
             winios_pointer(dx, dy, 0x0001, 0)
@@ -125,6 +134,7 @@ final class MetalBackedView: UIView, ControllerPointerTarget {
         // touch (landing before the first lift is processed) is silently
         // swallowed — drag-arm never fired (2026-07-06). Two-finger
         // scroll/right-click need it too.
+        addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(pointerHovered(_:))))
         self.isMultipleTouchEnabled = true
         self.isUserInteractionEnabled = true
         self.backgroundColor = .clear
@@ -150,6 +160,8 @@ final class MetalBackedView: UIView, ControllerPointerTarget {
     private var twoFingerStartPoint = CGPoint.zero
 
     @objc private func resignInput() {
+        mouseInsideSurface = false
+        PhysicalMouseBridge.shared.refreshCapture()
         cancelTouchSession()
         hardwareKeyboard.releaseAll()
         if Self.keyboardTarget === self {
@@ -166,6 +178,7 @@ final class MetalBackedView: UIView, ControllerPointerTarget {
             let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
                 guard let self else { return }
                 PhysicalControllerBridge.shared.refreshCapture()
+                PhysicalMouseBridge.shared.refreshCapture()
                 let size = MetalHostView.shared.metalLayer.drawableSize
                 if size != self.lastDrawableSize {
                     self.lastDrawableSize = size
@@ -219,6 +232,7 @@ final class MetalBackedView: UIView, ControllerPointerTarget {
         super.didMoveToWindow()
         guard let w = window else {
             PhysicalControllerBridge.shared.detach(self)
+            PhysicalMouseBridge.shared.detach(self)
             resignInput()
             if Self.keyboardTarget === self {
                 Self.keyboardTarget = nil
@@ -228,6 +242,7 @@ final class MetalBackedView: UIView, ControllerPointerTarget {
         }
         MetalBackedView.keyboardTarget = self  // keyboard button targets the live view
         PhysicalControllerBridge.shared.attach(self)
+        PhysicalMouseBridge.shared.attach(self)
         // SwiftUI ancestors attach gesture recognizers that can delay or
         // cancel raw touch delivery (double-tap timing is exactly what
         // they punish). Defuse them for our subtree.
@@ -340,10 +355,14 @@ final class MetalBackedView: UIView, ControllerPointerTarget {
         return CGPoint(x: x / n, y: y / n)
     }
     private func activeTouches(_ event: UIEvent?) -> [UITouch] {
-        (event?.allTouches ?? []).filter { $0.view === self && $0.phase != .ended && $0.phase != .cancelled }
+        (event?.allTouches ?? []).filter { $0.view === self && $0.phase != .ended && $0.phase != .cancelled &&
+            !($0.type == .indirectPointer && PhysicalMouseBridge.shared.isCapturing) }
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // GCMouse already sends these clicks; do not duplicate them as touch taps.
+        let touches = touches.filter { !($0.type == .indirectPointer && PhysicalMouseBridge.shared.isCapturing) }
+        guard !touches.isEmpty else { return }
         guard desktopMode else {
             guard directTouch == nil, let t = touches.first else { return }
             directTouch = t
@@ -942,6 +961,8 @@ final class InputSettings: ObservableObject {
     @Published var controllerEnabled = false { didSet { updateController(); save() } }
     @Published var controllerSpeed = 800.0 { didSet { updateController(); save() } }
     @Published var controllerDeadZone = 0.12 { didSet { updateController(); save() } }
+    @Published var mouseEnabled = false { didSet { updateMouse(); save() } }
+    @Published var mouseSensitivity = 1.0 { didSet { updateMouse(); save() } }
     /// ml649: heavy diagnostics. Default OFF so the shipped default is the fast
     /// path; flip it on only when a run needs to be explainable.
     @Published var diagnostics = false { didSet { madeira_set_diag_enabled(diagnostics ? 1 : 0); save() } }
@@ -964,6 +985,8 @@ final class InputSettings: ObservableObject {
             sensAbs  = DisplayGeometry.sensitivity(j["sensAbs"] as? Double ?? 2.0)
             sensRel  = DisplayGeometry.sensitivity(j["sensRel"] as? Double ?? 2.0)
             diagnostics = j["diagnostics"] as? Bool ?? false
+            mouseEnabled = j["mouseEnabled"] as? Bool ?? false
+            mouseSensitivity = PointerMotion.sensitivity(j["mouseSensitivity"] as? Double ?? 1)
             controllerEnabled = j["controllerEnabled"] as? Bool ?? false
             controllerSpeed = ControllerMath.speed(j["controllerSpeed"] as? Double ?? 800)
             controllerDeadZone = ControllerMath.deadZone(j["controllerDeadZone"] as? Double ?? 0.12)
@@ -971,6 +994,12 @@ final class InputSettings: ObservableObject {
         loading = false
         madeira_set_diag_enabled(diagnostics ? 1 : 0)   // push the restored value down
         updateController()
+        updateMouse()
+    }
+
+    private func updateMouse() {
+        guard !loading else { return }
+        PhysicalMouseBridge.shared.configure(enabled: mouseEnabled, sensitivity: mouseSensitivity)
     }
 
     private func updateController() {
@@ -982,7 +1011,8 @@ final class InputSettings: ObservableObject {
     private func save() {
         guard !loading else { return }
         let j: [String: Any] = ["relative": relative, "sensAbs": sensAbs, "sensRel": sensRel,
-            "diagnostics": diagnostics, "controllerEnabled": controllerEnabled,
+            "diagnostics": diagnostics, "mouseEnabled": mouseEnabled,
+            "mouseSensitivity": PointerMotion.sensitivity(mouseSensitivity), "controllerEnabled": controllerEnabled,
             "controllerSpeed": ControllerMath.speed(controllerSpeed),
             "controllerDeadZone": ControllerMath.deadZone(controllerDeadZone)]
         guard let d = try? JSONSerialization.data(withJSONObject: j) else { return }
@@ -1004,6 +1034,7 @@ struct ContentView: View {
     @State private var debuggerAttached = isDebuggerAttached()
     @ObservedObject private var input = InputSettings.shared
     @ObservedObject private var controllers = PhysicalControllerBridge.shared
+    @ObservedObject private var mice = PhysicalMouseBridge.shared
     @State private var pointerPanel = false
     @Namespace private var pointerNS
     /// .compact = iPhone landscape: game surface expands, arrow keys appear.
@@ -1071,10 +1102,20 @@ struct ContentView: View {
             Text("LT/RT: right/left click · D-pad: arrows")
             Text("LB/RB: Q/F · L3/R3: Shift/C")
             Text("Menu: Esc · Options: Tab · Not XInput")
+            Divider()
+            Toggle("Physical mouse over guest surface", isOn: $input.mouseEnabled)
+            Text("\(mice.connectedCount) mouse device(s) connected")
+            Picker("Mouse sensitivity", selection: $input.mouseSensitivity) {
+                ForEach([0.5, 1.0, 1.5, 2.0, 3.0], id: \.self) { value in
+                    Text("\(value, specifier: "%.1f")×").tag(value)
+                }
+            }
+            Text("Buttons, side buttons and wheel · Move outside to release")
+            Text("Uses current absolute/relative mode · No pointer lock")
         } label: {
             Image(systemName: input.controllerEnabled ? "gamecontroller.fill" : "gamecontroller")
         }
-        .accessibilityLabel("Physical controller settings")
+        .accessibilityLabel("Physical controller and mouse settings")
     }
 
     /// Portrait: classic tooling layout — header, badges, 240pt game strip,

@@ -53,6 +53,7 @@ swiftc -warnings-as-errors -o "$OUT/controller-keyboard-test" \
     "$ROOT/app/Madeira/ControllerMath.swift" "$ROOT/app/Madeira/HardwareKeyboardState.swift" \
     "$ROOT/app/Madeira/GuestInputState.swift" "$ROOT/tests/swift/ControllerKeyboardTests.swift"
 "$OUT/controller-keyboard-test"
+bash "$ROOT/tests/run-mouse-tests.sh"
 python3 "$ROOT/tests/test_remote_runner.py"
 python3 "$ROOT/tests/test_template_tools.py"
 echo 'Portable suites passed.'
