@@ -41,6 +41,10 @@ void winios_post_touch_up(int x, int y);
  * down=1 press, down=0 release. */
 void winios_post_key(int vk, int down);
 
+/* Cancel pending input and reconcile delivered guest keys/buttons to released.
+ * Thread-safe; use on app deactivation, control teardown and focus loss. */
+void winios_release_all_inputs(void);
+
 /* S2 desktop compositor placement. Called by the Swift presentation
  * placeholder (MetalBackedView) with its bounds in UIWindow coords —
  * the wine virtual desktop renders aspect-fit inside this frame, like

@@ -12,4 +12,6 @@ fi
 "$CC" "${CFLAGS[@]}" -I "$ROOT/research/remote-metal" \
     "$ROOT/research/remote-metal/schema/wire_test.c" -o "$OUT/wire-test"
 "$OUT/wire-test"
+"$CC" "${CFLAGS[@]}" "$ROOT/tests/input_queue_test.c" -o "$OUT/input-test"
+"$OUT/input-test"
 echo 'Portable suites passed.'

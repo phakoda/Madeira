@@ -461,77 +461,66 @@ extern void winios_drv_post_key(unsigned short vk, unsigned int flags);
 extern void winios_dump_window_tree(void);
 extern void ios_dump_all_thread_stacks(void);
 
-#define WINIOS_RING_SIZE 256
-#define WINIOS_EV_MOUSE 0
-#define WINIOS_EV_KEY   1
-#define KEYEVENTF_KEYUP 0x0002
-typedef struct {
-    unsigned int type;       /* WINIOS_EV_MOUSE / WINIOS_EV_KEY */
-    int x, y;                /* mouse: coords; key: x = virtual-key code */
-    unsigned int flags;      /* mouse: MOUSEEVENTF_*; key: KEYEVENTF_* */
-    unsigned int data;       /* mouse: mouseData (wheel delta) */
-} winios_input_event_t;
+#include "InputQueue.h"
 
-static struct {
-    winios_input_event_t buf[WINIOS_RING_SIZE];
-    unsigned int head;       /* producer cursor (Swift side) */
-    unsigned int tail;       /* consumer cursor (Wine drain) */
-    pthread_mutex_t lock;
-} g_input_q = { .lock = PTHREAD_MUTEX_INITIALIZER };
+static madeira_input_queue g_input_q;
+static pthread_mutex_t g_input_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Multiple Wine threads can pump events. Keep pop + delivery ordered without
+ * blocking a second pump or ever holding the producer lock across Wine IPC. */
+static pthread_mutex_t g_input_drain_lock = PTHREAD_MUTEX_INITIALIZER;
+extern int madeira_get_diag_enabled(void);
 
 static void winios_q_push_ev(unsigned int type, int x, int y, unsigned int flags, unsigned int data) {
-    pthread_mutex_lock(&g_input_q.lock);
-    unsigned int next = (g_input_q.head + 1) % WINIOS_RING_SIZE;
-    if (next != g_input_q.tail) {
-        g_input_q.buf[g_input_q.head] = (winios_input_event_t){type, x, y, flags, data};
-        g_input_q.head = next;
-    }
-    /* If buffer is full we drop the oldest event by simply not advancing —
-     * better than blocking the UI thread on a Wine event drain. */
-    pthread_mutex_unlock(&g_input_q.lock);
+    pthread_mutex_lock(&g_input_lock);
+    madeira_input_push(&g_input_q, (winios_input_event_t){type, x, y, flags, data});
+    pthread_mutex_unlock(&g_input_lock);
+}
+
+void winios_release_all_inputs(void) {
+    pthread_mutex_lock(&g_input_lock);
+    madeira_input_release_all(&g_input_q);
+    pthread_mutex_unlock(&g_input_lock);
 }
 
 /* Public C entry points for Swift / UIKit gesture handlers.
- * Coordinates are in iOS view-local pixels; we scale to a fixed
- * 1024×768 logical surface inside winios_pProcessEvents to match
- * what DXMT swapchains use. */
+ * Coordinates are guest desktop pixels; Swift performs the aspect-fit
+ * mapping. Do not scale a second time in the Wine pump. */
 void winios_post_touch_down(int x, int y) {
-    fprintf(stderr, "[winios] post_touch_down x=%d y=%d\n", x, y); fflush(stderr);
+    if (madeira_get_diag_enabled()) fprintf(stderr, "[winios] post_touch_down x=%d y=%d\n", x, y);
     winios_q_push_ev(WINIOS_EV_MOUSE, x, y, MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, 0);
 }
 
 void winios_post_touch_move(int x, int y) {
-    static unsigned cnt;
-    if ((cnt++ % 30) == 0) {
-        fprintf(stderr, "[winios] post_touch_move x=%d y=%d (n=%u)\n", x, y, cnt); fflush(stderr);
-    }
+    if (madeira_get_diag_enabled())
+        fprintf(stderr, "[winios] post_touch_move x=%d y=%d\n", x, y);
     winios_q_push_ev(WINIOS_EV_MOUSE, x, y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, 0);
 }
 
 void winios_post_touch_up(int x, int y) {
-    fprintf(stderr, "[winios] post_touch_up x=%d y=%d\n", x, y); fflush(stderr);
+    if (madeira_get_diag_enabled()) fprintf(stderr, "[winios] post_touch_up x=%d y=%d\n", x, y);
     winios_q_push_ev(WINIOS_EV_MOUSE, x, y, MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, 0);
 }
 
 /* Key press bridge. vk = Windows virtual-key code, down = 1 for press,
  * 0 for release. Queued like mouse events; drained in pProcessEvents. */
 void winios_post_key(int vk, int down) {
-    fprintf(stderr, "[winios] post_key vk=0x%x down=%d\n", vk, down); fflush(stderr);
-    winios_q_push_ev(WINIOS_EV_KEY, vk, 0, down ? 0 : KEYEVENTF_KEYUP, 0);
+    if (madeira_get_diag_enabled()) fprintf(stderr, "[winios] post_key vk=0x%x down=%d\n", vk, down);
+    winios_q_push_ev(WINIOS_EV_KEY, vk, 0, down ? 0 : WINIOS_KEYUP, 0);
 }
 
 BOOL winios_pProcessEvents(DWORD mask) {
+    if (pthread_mutex_trylock(&g_input_drain_lock) != 0) return FALSE;
     static unsigned int cnt;
     static int quiet = -1;
     if (quiet < 0) quiet = getenv("MADEIRA_QUIET") != NULL;
-    if ((cnt++ % 240) == 0 && !quiet) {
+    if (madeira_get_diag_enabled() && (cnt++ % 240) == 0 && !quiet) {
         fprintf(stderr, "[winios] pProcessEvents called n=%u\n", cnt); fflush(stderr);
     }
     /* Desktop debugging: dump the full window tree every ~5s. Runs on
      * this wine thread (valid TEB — the dump walks win32u internals). */
     static int desk = -1;
     if (desk < 0) desk = ({ const char *d = getenv("MADEIRA_DESKTOP"); d && *d == '1'; });
-    if (desk) {
+    if (desk && madeira_get_diag_enabled()) {
         static double next_tree_dump;
         double now = CACurrentMediaTime();
         if (now >= next_tree_dump) {
@@ -540,24 +529,22 @@ BOOL winios_pProcessEvents(DWORD mask) {
         }
     }
     BOOL drained = FALSE;
-    for (;;) {
+    /* A busy producer must not hold Wine's message pump forever. */
+    for (unsigned n = 0; n < WINIOS_RING_SIZE + 261; ++n) {
         winios_input_event_t e;
-        pthread_mutex_lock(&g_input_q.lock);
-        if (g_input_q.tail == g_input_q.head) {
-            pthread_mutex_unlock(&g_input_q.lock);
-            break;
-        }
-        e = g_input_q.buf[g_input_q.tail];
-        g_input_q.tail = (g_input_q.tail + 1) % WINIOS_RING_SIZE;
-        pthread_mutex_unlock(&g_input_q.lock);
-
-        fprintf(stderr, "[winios] drain type=%u x=%d y=%d flags=0x%x\n", e.type, e.x, e.y, e.flags); fflush(stderr);
+        pthread_mutex_lock(&g_input_lock);
+        bool have = madeira_input_pop(&g_input_q, &e);
+        pthread_mutex_unlock(&g_input_lock);
+        if (!have) break;
+        if (madeira_get_diag_enabled())
+            fprintf(stderr, "[winios] drain type=%u x=%d y=%d flags=0x%x\n", e.type, e.x, e.y, e.flags);
         if (e.type == WINIOS_EV_KEY)
             winios_drv_post_key((unsigned short)e.x, e.flags);
         else
             winios_drv_post_mouse(e.x, e.y, e.flags, e.data, NULL);
         drained = TRUE;
     }
+    pthread_mutex_unlock(&g_input_drain_lock);
     return drained;
 }
 
@@ -691,7 +678,7 @@ static void winios_ensure_compositor(void) {
                           dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
         dispatch_source_set_timer(stack_timer, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC),
                                   20 * NSEC_PER_SEC, NSEC_PER_SEC);
-        dispatch_source_set_event_handler(stack_timer, ^{ ios_dump_all_thread_stacks(); });
+        dispatch_source_set_event_handler(stack_timer, ^{ if (madeira_get_diag_enabled()) ios_dump_all_thread_stacks(); });
         dispatch_resume(stack_timer);
     }
 }

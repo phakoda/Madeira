@@ -36,3 +36,21 @@ and a macOS Metal daemon, and was not run here.
 
 Further changes, test commands and device acceptance checks are recorded below
 as they are implemented.
+
+## Input queue (first implementation commit)
+
+Replaced silent overflow drops with adjacent-motion coalescing, preferential
+motion eviction, and bounded authoritative state reconciliation when the queue
+contains transitions only. Relative samples sum without signed overflow; absolute
+samples retain the latest position without crossing button/key/wheel barriers.
+Wine pumps are serialized through delivery, without holding the producer lock
+across Wine IPC, and have a finite work budget. Added an explicit release-all API.
+
+Normal input no longer formats/flushes per-event logs or dumps window trees and
+all thread stacks unless diagnostics are enabled. Regression tests compile the
+**actual production header**, including a deterministic 200,000-event stress run,
+held-key/button overflow, cancellation, motion ordering, and integer boundaries.
+ASan/UBSan result: **200,991 input checks; 63 existing wire checks; zero failures**.
+At pathological transition-only overflow, historic taps can still be lost; the
+contract is bounded memory and eventual correct held state, not lossless unbounded
+input buffering.
