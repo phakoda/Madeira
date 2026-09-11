@@ -14,4 +14,9 @@ fi
 "$OUT/wire-test"
 "$CC" "${CFLAGS[@]}" "$ROOT/tests/input_queue_test.c" -o "$OUT/input-test"
 "$OUT/input-test"
+swiftc -warnings-as-errors -o "$OUT/geometry-input-test" \
+    "$ROOT/app/Madeira/DisplayGeometry.swift" "$ROOT/app/Madeira/GuestInputState.swift" \
+    "$ROOT/tests/swift/GeometryInputTests.swift"
+"$OUT/geometry-input-test"
+swiftc -frontend -parse "$ROOT/app/Madeira/ContentView.swift"
 echo 'Portable suites passed.'

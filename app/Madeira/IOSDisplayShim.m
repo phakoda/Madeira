@@ -55,35 +55,64 @@ void madeira_display_set_layer(CAMetalLayer *layer) {
 
 // --- macdrv_* implementations ---
 
-// DXMT only dereferences client_cocoa_view (passing it straight back to
-// macdrv_view_create_metal_view), so we use that field to carry the HWND
-// through: desktop mode needs it to pick the right window's layer. One
-// static struct suffices — DXMT's get/create/release sequence is not
-// concurrent per-process, and the value is consumed before release.
-static struct macdrv_win_data g_fake_win_data = {
-    .hwnd              = NULL,
-    .cocoa_window      = NULL,
-    .cocoa_view        = (macdrv_view)(uintptr_t)0x1,
-    .client_cocoa_view = (macdrv_view)(uintptr_t)0x1,
-};
-
+// Each acquisition owns its record. Different guest threads may create
+// swapchains concurrently; a shared mutable HWND record routes one window's
+// swapchain to another window's layer. release_win_data ends this lifetime.
 static struct macdrv_win_data *my_get_win_data(HWND hwnd) {
-    g_fake_win_data.hwnd = hwnd;
-    g_fake_win_data.client_cocoa_view = (macdrv_view)hwnd;
-    return &g_fake_win_data;
+    struct macdrv_win_data *data = calloc(1, sizeof(*data));
+    if (!data) return NULL;
+    data->hwnd = hwnd;
+    data->cocoa_view = (macdrv_view)hwnd;
+    data->client_cocoa_view = (macdrv_view)hwnd;
+    return data;
 }
 
 static void my_release_win_data(struct macdrv_win_data *data) {
-    (void)data;
+    free(data);
 }
 
 static int madeira_desktop_mode(void) {
-    static int desk = -1;
-    if (desk < 0) {
+    static int desk;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
         const char *d = getenv("MADEIRA_DESKTOP");
         desk = d && *d == '1';
-    }
+    });
     return desk;
+}
+
+// Retain the existing optional private display workaround, but respect the
+// runtime scalar ABI. NSObject performSelector:withObject: passes a pointer;
+// NSNumber(false) is nonzero, and an NSNumber pointer is not a frame rate.
+// Unknown/removed signatures are skipped. NSInvocation is used only on setup,
+// never on the present hot path. This is NOT an App Store compatibility claim.
+static BOOL set_layer_scalar(CAMetalLayer *layer, NSString *name, NSInteger value) {
+    SEL selector = NSSelectorFromString(name);
+    if (![layer respondsToSelector:selector]) return NO;
+    NSMethodSignature *signature = [layer methodSignatureForSelector:selector];
+    if (!signature || signature.numberOfArguments != 3 ||
+        strcmp(signature.methodReturnType, "v")) return NO;
+    const char *type = [signature getArgumentTypeAtIndex:2];
+    NSInvocation *call = [NSInvocation invocationWithMethodSignature:signature];
+    call.target = layer;
+    call.selector = selector;
+    // setArgument copies exactly the parameter size for this signature.
+    if (!strcmp(type, "B")) { _Bool v = value != 0; [call setArgument:&v atIndex:2]; }
+    else if (!strcmp(type, "c")) { signed char v = (signed char)value; [call setArgument:&v atIndex:2]; }
+    else if (!strcmp(type, "q")) { long long v = value; [call setArgument:&v atIndex:2]; }
+    else if (!strcmp(type, "i")) { int v = (int)value; [call setArgument:&v atIndex:2]; }
+    else if (!strcmp(type, "l")) { long v = value; [call setArgument:&v atIndex:2]; }
+    else return NO;
+    [call invoke];
+    return YES;
+}
+
+void madeira_display_configure_layer(CAMetalLayer *layer, int refresh_rate) {
+    const char *disabled = getenv("MADEIRA_DISABLE_PRIVATE_DISPLAY_TUNING");
+    if (disabled && *disabled == '1') return;
+    set_layer_scalar(layer, @"setDisplaySyncEnabled:", 0);
+    if (refresh_rate > 0 && refresh_rate <= 240)
+        set_layer_scalar(layer, @"setNominalFramesPerSecond:", refresh_rate);
 }
 
 // Winios.m compositor: per-window CAMetalLayer inside the window's

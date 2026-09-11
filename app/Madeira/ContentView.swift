@@ -41,34 +41,11 @@ final class MetalHostView: UIView {
         metalLayer.device = MTLCreateSystemDefaultDevice()
         metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
-        // 2026-07-03 MeloNX trick: displaySyncEnabled is macOS-public but
-        // exists as PRIVATE API on iOS. Disabling it takes our presents out
-        // of the display-sync scheduling machinery — the thing that has been
-        // silently dropping them (presentedTime==0 on all but occasional
-        // frames) at our sub-1Hz game present cadence. MeloNX (shipping
-        // Switch emulator) sets exactly this pair on its layer.
-        let syncSel = NSSelectorFromString("setDisplaySyncEnabled:")
-        if metalLayer.responds(to: syncSel) {
-            metalLayer.perform(syncSel, with: NSNumber(value: false))
-            LogStore.shared.log("MetalLayer: displaySyncEnabled=false (private API, MeloNX pattern)")
-        }
-        /* ml651: was hardcoded 60, which contradicted everything around it —
-         * FPSOverlay asks the display link for CAFrameRateRange(preferred: 120)
-         * while this declared the surface a 60Hz one. Track the screen instead.
-         *
-         * ⚠️ HYPOTHESIS, NOT A DIAGNOSIS. displaySyncEnabled=false directly above
-         * takes our presents out of display-sync scheduling, so this nominal
-         * value may well be inert. It is one line and it removes a genuine
-         * contradiction; if the A/B shows nothing, the cap is elsewhere and we
-         * have eliminated it rather than argued about it. */
-        let fpsSel = NSSelectorFromString("setNominalFramesPerSecond:")
-        if metalLayer.responds(to: fpsSel) {
-            let hz = UIScreen.main.maximumFramesPerSecond
-            metalLayer.perform(fpsSel, with: hz as NSNumber)
-            LogStore.shared.log("MetalLayer: ml651 nominalFPS=\(hz) (was hardcoded 60; "
-                                + "display link asks preferred=120)")
-        }
-        UIApplication.shared.isIdleTimerDisabled = true
+        // Scalar Objective-C setters cannot be called with perform(_:with:):
+        // that passes an object pointer, not a BOOL/NSInteger value.
+        madeira_display_configure_layer(metalLayer, Int32(UIScreen.main.maximumFramesPerSecond))
+        metalLayer.isOpaque = true
+        metalLayer.presentsWithTransaction = false
         // Set once so DXMT's swapchain setup never blocks on a zero-sized
         // layer. After this, DXMT's setProps is the ONLY drawableSize
         // writer — per-layout rewrites from the app were a second writer
@@ -104,8 +81,70 @@ final class MetalBackedView: UIView {
         self.isMultipleTouchEnabled = true
         self.isUserInteractionEnabled = true
         self.backgroundColor = .clear
+        _ = GuestInput.shared
+        NotificationCenter.default.addObserver(self, selector: #selector(resignInput),
+            name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(resumeDisplay),
+            name: UIApplication.didBecomeActiveNotification, object: nil)
     }
-    required init?(coder: NSCoder) { super.init(coder: coder) }
+    required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
+    deinit {
+        layoutTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    private var layoutTimer: Timer?
+    private var lastDrawableSize = CGSize.zero
+    private let pointerSource = UUID()
+    private var primaryTouch: UITouch?
+    private var directTouch: UITouch?
+    private var twoFingerStartPoint = CGPoint.zero
+
+    @objc private func resignInput() {
+        cancelTouchSession()
+        if Self.keyboardTarget === self {
+            GuestInput.shared.releaseAll()
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
+        layoutTimer?.invalidate()
+        layoutTimer = nil
+    }
+    @objc private func resumeDisplay() {
+        guard window != nil, Self.keyboardTarget === self else { return }
+        UIApplication.shared.isIdleTimerDisabled = true
+        if layoutTimer == nil {
+            let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                let size = MetalHostView.shared.metalLayer.drawableSize
+                if size != self.lastDrawableSize {
+                    self.lastDrawableSize = size
+                    self.setNeedsLayout()
+                }
+            }
+            layoutTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
+        }
+        setNeedsLayout()
+    }
+
+    private var guestSize: CGSize {
+        DisplayGeometry.validSize(CGSize(width: envInt("MADEIRA_SCREEN_W", 1024),
+                                         height: envInt("MADEIRA_SCREEN_H", 768)))
+    }
+    private func cancelTouchSession() {
+        touchGeneration &+= 1
+        GuestInput.shared.state.release(source: pointerSource)
+        primaryTouch = nil
+        directTouch = nil
+        dragTouch = nil
+        dragActive = false
+        twoFingerActive = false
+        twoFingerMoved = false
+        movedBeyondSlop = false
+        scrollAccum = 0
+        relCarryX = 0
+        relCarryY = 0
+    }
 
     // Visibility-stall postmortem (2026-07-03): the intermittent "presents
     // count but the screen stays black until a bg/fg or screenshot" state
@@ -117,22 +156,24 @@ final class MetalBackedView: UIView {
     // ~1 FPS content mostly doesn't. Resolution path: raise game FPS (perf
     // work), with a steady-rate re-present in DXMT as fallback insurance.
 
-    /// Largest 4:3 rect (the 1024×768 logical surface's aspect) that fits
-    /// centered in our bounds. The window-level host view gets THIS frame,
-    /// not our full bounds — otherwise landscape stretches the game to the
-    /// display edges (2026-07-05). Touch mapping uses the same rect so
-    /// letterboxing never skews input.
+    /// Fit the actual drawable, without overwriting DXMT's drawableSize.
+    /// Guest coordinates remain in Wine's logical desktop coordinate system.
     private func gameRect() -> CGRect {
-        let gw: CGFloat = 1024, gh: CGFloat = 768
-        let scale = min(bounds.width / gw, bounds.height / gh)
-        let w = gw * scale, h = gh * scale
-        return CGRect(x: (bounds.width - w) / 2, y: (bounds.height - h) / 2,
-                      width: max(w, 1), height: max(h, 1))
+        let size = desktopMode ? guestSize : DisplayGeometry.validSize(
+            MetalHostView.shared.metalLayer.drawableSize, fallback: guestSize)
+        return DisplayGeometry.aspectFit(size, in: bounds)
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard let w = window else { return }   // detach: leave the host be
+        guard let w = window else {
+            resignInput()
+            if Self.keyboardTarget === self {
+                Self.keyboardTarget = nil
+                MetalHostView.shared.isHidden = true // retain the layer; never replace it
+            }
+            return
+        }
         MetalBackedView.keyboardTarget = self  // keyboard button targets the live view
         // SwiftUI ancestors attach gesture recognizers that can delay or
         // cancel raw touch delivery (double-tap timing is exactly what
@@ -147,11 +188,16 @@ final class MetalBackedView: UIView {
             v = s.superview
         }
         let host = MetalHostView.shared
+        host.isHidden = false
+        if UIApplication.shared.applicationState == .active { resumeDisplay() }
         if host.superview !== w {
             host.removeFromSuperview()
             w.addSubview(host)
         }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         host.frame = convert(gameRect(), to: w)
+        CATransaction.commit()
         // S2 desktop mode: the winios compositor renders the wine virtual
         // desktop aspect-fit inside THIS placeholder's area, exactly like
         // the games' Metal layer — never over the whole phone screen.
@@ -167,21 +213,17 @@ final class MetalBackedView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         if let w = window {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             MetalHostView.shared.frame = convert(gameRect(), to: w)
+            CATransaction.commit()
             let full = convert(bounds, to: w)
             winios_set_compositor_frame(full.minX, full.minY, full.width, full.height)
         }
     }
 
-    // Map touch point in view-local UI points to the 1024×768 logical
-    // surface DXMT swapchains use, then post to winios.drv. Coordinates
-    // are relative to the aspect-fit gameRect (letterbox borders clamp).
     private func mapTouch(_ touch: UITouch) -> (Int32, Int32) {
-        let p = touch.location(in: self)
-        let r = gameRect()
-        let x = Int32(min(max((p.x - r.minX) * 1024 / r.width, 0), 1023))
-        let y = Int32(min(max((p.y - r.minY) * 768 / r.height, 0), 767))
-        return (x, y)
+        DisplayGeometry.guestPoint(touch.location(in: self), in: gameRect(), guest: guestSize)
     }
 
     // ==================================================================
@@ -224,11 +266,19 @@ final class MetalBackedView: UIView {
         return v.pointee == 49  // '1'
     }
     private func envInt(_ name: String, _ def: Int) -> Int {
-        guard let v = getenv(name), let i = Int(String(cString: v)) else { return def }
+        guard let v = getenv(name), let i = Int(String(cString: v)), (1...16384).contains(i) else { return def }
         return i
     }
     private func postPointer(_ flags: UInt32, data: Int32 = 0) {
-        winios_pointer(Int32(Self.cursor.x), Int32(Self.cursor.y), flags, UInt32(bitPattern: data))
+        let input = GuestInput.shared.state
+        switch flags {
+        case F_LDOWN: input.set(.mouse(0), down: true, source: pointerSource)
+        case F_LUP: input.set(.mouse(0), down: false, source: pointerSource)
+        case F_RDOWN: input.set(.mouse(1), down: true, source: pointerSource)
+        case F_RUP: input.set(.mouse(1), down: false, source: pointerSource)
+        default:
+            winios_pointer(Int32(Self.cursor.x), Int32(Self.cursor.y), flags, UInt32(bitPattern: data))
+        }
     }
     private func avgPoint(_ touches: [UITouch]) -> CGPoint {
         var x: CGFloat = 0, y: CGFloat = 0
@@ -237,29 +287,37 @@ final class MetalBackedView: UIView {
         return CGPoint(x: x / n, y: y / n)
     }
     private func activeTouches(_ event: UIEvent?) -> [UITouch] {
-        (event?.allTouches ?? []).filter { $0.phase != .ended && $0.phase != .cancelled }
+        (event?.allTouches ?? []).filter { $0.view === self && $0.phase != .ended && $0.phase != .cancelled }
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard desktopMode else {
-            guard let t = touches.first else { return }
+            guard directTouch == nil, let t = touches.first else { return }
+            directTouch = t
             let (x, y) = mapTouch(t)
-            winios_post_touch_down(x, y)
+            winios_post_touch_move(x, y)
+            GuestInput.shared.state.set(.mouse(0), down: true, source: pointerSource)
             return
         }
-        let now = Date().timeIntervalSinceReferenceDate
+        let now = CACurrentMediaTime()
         let active = activeTouches(event)
-        touchGeneration += 1
+        touchGeneration &+= 1
         if active.count >= 2 {
+            if twoFingerActive { return } // a third finger must not restart the gesture
+            if dragActive { postPointer(F_LUP) }
+            dragActive = false
+            dragTouch = nil
             twoFingerActive = true
             twoFingerMoved = false
             twoFingerStartTime = now
-            lastTwoFingerY = avgPoint(active).y
+            twoFingerStartPoint = avgPoint(active)
+            lastTwoFingerY = twoFingerStartPoint.y
             scrollAccum = 0
-            // a drag started by the first finger stays active; harmless
+            // Scrolling owns this session until every finger has lifted.
             return
         }
-        guard let t = touches.first else { return }
+        guard primaryTouch == nil, let t = touches.first else { return }
+        primaryTouch = t
         let p = t.location(in: self)
         touchStartPoint = p
         lastPanPoint = p
@@ -286,7 +344,7 @@ final class MetalBackedView: UIView {
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard desktopMode else {
-            guard let t = touches.first else { return }
+            guard let t = directTouch, touches.contains(t) else { return }
             let (x, y) = mapTouch(t)
             winios_post_touch_move(x, y)
             return
@@ -297,7 +355,9 @@ final class MetalBackedView: UIView {
             let avg = avgPoint(active)
             let dy = avg.y - lastTwoFingerY
             lastTwoFingerY = avg.y
-            if abs(dy) > 2 { twoFingerMoved = true }
+            if hypot(avg.x - twoFingerStartPoint.x, avg.y - twoFingerStartPoint.y) > 6 {
+                twoFingerMoved = true
+            }
             scrollAccum += dy
             // 14pt of finger travel = one wheel notch. ml641 flipped the sign:
             // on a touchscreen the content follows the finger, so dragging UP
@@ -311,7 +371,7 @@ final class MetalBackedView: UIView {
             guard touches.contains(d) else { return }  // only the old tap finger moved
             t = d
         } else {
-            guard let f = touches.first else { return }
+            guard let f = primaryTouch, touches.contains(f) else { return }
             t = f
         }
         let p = t.location(in: self)
@@ -341,7 +401,7 @@ final class MetalBackedView: UIView {
          * by dragging RIGHT. That is the same sign as a mouse. Negate both terms
          * for content-drag (finger-follows-world) feel. */
         if InputSettings.shared.relative {
-            let sens = CGFloat(InputSettings.shared.sensRel)
+            let sens = CGFloat(DisplayGeometry.sensitivity(InputSettings.shared.sensRel))
             relCarryX += dx * sens
             relCarryY += dy * sens
             let ix = Int32(max(-30000, min(30000, relCarryX)))
@@ -352,7 +412,7 @@ final class MetalBackedView: UIView {
             return
         }
 
-        let sens = CGFloat(InputSettings.shared.sensAbs)   // desktop px per view pt
+        let sens = CGFloat(DisplayGeometry.sensitivity(InputSettings.shared.sensAbs))   // desktop px per view pt
         let maxX = CGFloat(envInt("MADEIRA_SCREEN_W", 1024) - 1)
         let maxY = CGFloat(envInt("MADEIRA_SCREEN_H", 768) - 1)
         Self.cursor.x = min(max(Self.cursor.x + dx * sens, 0), maxX)
@@ -362,12 +422,14 @@ final class MetalBackedView: UIView {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard desktopMode else {
-            guard let t = touches.first else { return }
+            guard let t = directTouch, touches.contains(t) else { return }
             let (x, y) = mapTouch(t)
-            winios_post_touch_up(x, y)
+            winios_post_touch_move(x, y)
+            GuestInput.shared.state.release(source: pointerSource)
+            directTouch = nil
             return
         }
-        let now = Date().timeIntervalSinceReferenceDate
+        let now = CACurrentMediaTime()
         if twoFingerActive {
             if activeTouches(event).isEmpty {
                 if !twoFingerMoved && now - twoFingerStartTime < 0.40
@@ -375,11 +437,13 @@ final class MetalBackedView: UIView {
                     postPointer(F_RDOWN)
                     postPointer(F_RUP)
                 }
-                twoFingerActive = false
+                cancelTouchSession()
             }
             return
         }
-        touchGeneration += 1   // cancel any pending long-press
+        guard let primary = primaryTouch, touches.contains(primary) else { return }
+        primaryTouch = nil
+        touchGeneration &+= 1   // cancel any pending long-press
         if dragActive {
             if let d = dragTouch, !touches.contains(d) {
                 fputs("[trackpad] ended: non-drag finger up (drag continues)\n", stderr)
@@ -402,18 +466,9 @@ final class MetalBackedView: UIView {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard desktopMode else {
-            guard let t = touches.first else { return }
-            let (x, y) = mapTouch(t)
-            winios_post_touch_up(x, y)
-            return
-        }
-        fputs("[trackpad] CANCELLED (dragActive=\(dragActive))\n", stderr)
-        touchGeneration += 1
-        if dragActive { postPointer(F_LUP); dragActive = false }
-        dragTouch = nil
-        twoFingerActive = false
+        cancelTouchSession()
     }
+
 }
 
 /// Arrow-key button with press/hold/release semantics. DragGesture with
@@ -425,6 +480,9 @@ struct HoldKeyView: View {
     var big = false   // landscape D-pad: thumb-sized
     @State private var isDown = false
 
+    @State private var inputSource = UUID()
+    @GestureState private var touching = false
+
     var body: some View {
         Text(label)
             .font(.system(size: big ? 22 : 14, weight: .semibold, design: .monospaced))
@@ -434,18 +492,27 @@ struct HoldKeyView: View {
             .cornerRadius(big ? 12 : 6)
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .updating($touching) { _, active, _ in active = true }
                     .onChanged { _ in
                         if !isDown {
                             isDown = true
-                            winios_post_key(vk, 1)
+                            GuestInput.shared.state.set(.key(vk), down: true, source: inputSource)
                         }
                     }
                     .onEnded { _ in
                         isDown = false
-                        winios_post_key(vk, 0)
+                        GuestInput.shared.state.set(.key(vk), down: false, source: inputSource)
                     }
             )
+            .onChange(of: touching) { _, active in if !active { cancelInput() } }
+            .onDisappear { cancelInput() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in cancelInput() }
     }
+    private func cancelInput() {
+        GuestInput.shared.state.release(source: inputSource)
+        isDown = false
+    }
+
 }
 
 /// Shared state for the expanded thumbstick pad. The pad cannot be drawn by
@@ -649,8 +716,8 @@ struct JoystickKeyView: View {
     private func apply(_ next: Int) {
         guard next != dir else { return }
         let old = Set(keys(for: dir)), new = Set(keys(for: next))
-        for vk in old.subtracting(new) { winios_post_key(vk, 0) }
-        for vk in new.subtracting(old) { winios_post_key(vk, 1) }
+        for vk in old.subtracting(new) { GuestInput.shared.state.set(.key(vk), down: false, source: inputSource) }
+        for vk in new.subtracting(old) { GuestInput.shared.state.set(.key(vk), down: true, source: inputSource) }
         dir = next
         JoystickPadState.shared.dir = next
     }
@@ -663,6 +730,9 @@ struct JoystickKeyView: View {
         if a < 0 { a += 360 }
         return Int((a + 22.5) / 45.0) % 8
     }
+
+    @State private var inputSource = UUID()
+    @GestureState private var touching = false
 
     var body: some View {
         // The idle ring lives in the row (inset inside the 34x30 button so it
@@ -695,6 +765,7 @@ struct JoystickKeyView: View {
             .animation(.spring(response: 0.32, dampingFraction: 0.62), value: held)
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .updating($touching) { _, active, _ in active = true }
                     .onChanged { g in
                         if !held {
                             held = true
@@ -717,7 +788,17 @@ struct JoystickKeyView: View {
                         }
                     }
             )
+            .onChange(of: touching) { _, active in if !active { cancelInput() } }
+            .onDisappear { cancelInput() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in cancelInput() }
     }
+    private func cancelInput() {
+        GuestInput.shared.state.release(source: inputSource)
+        held = false; dir = -1
+        JoystickPadState.shared.held = false
+        JoystickPadState.shared.dir = -1
+    }
+
 }
 
 // SwiftUI wrapper around the placeholder view.
@@ -733,7 +814,7 @@ extension MetalBackedView: UIKeyInput {
         if ch == "\n" || ch == "\r" { return (0x0D, false) }   // VK_RETURN
         if ch == "\t" { return (0x09, false) }                 // VK_TAB
         if ch == " " { return (0x20, false) }                  // VK_SPACE
-        if ch.isLetter, let up = ch.uppercased().first?.asciiValue, up >= 0x41, up <= 0x5A {
+        if ch.asciiValue != nil, ch.isLetter, let up = ch.uppercased().first?.asciiValue, up >= 0x41, up <= 0x5A {
             return (Int32(up), ch.isUppercase)                 // VK_A..VK_Z
         }
         if let a = ch.asciiValue, a >= 0x30, a <= 0x39 {
@@ -759,18 +840,21 @@ extension MetalBackedView: UIKeyInput {
     }
 
     func insertText(_ text: String) {
+        let source = UUID()
+        let input = GuestInput.shared.state
         for ch in text {
             guard let (vk, shift) = MetalBackedView.vkForChar(ch) else { continue }
-            if shift { winios_post_key(0x10, 1) }   // VK_SHIFT down
-            winios_post_key(vk, 1)
-            winios_post_key(vk, 0)
-            if shift { winios_post_key(0x10, 0) }    // VK_SHIFT up
+            if shift { input.set(.key(0x10), down: true, source: source) }
+            input.set(.key(vk), down: true, source: source)
+            input.set(.key(vk), down: false, source: source)
+            input.release(source: source)
         }
     }
 
     func deleteBackward() {
-        winios_post_key(0x08, 1)   // VK_BACK down
-        winios_post_key(0x08, 0)
+        let source = UUID()
+        GuestInput.shared.state.set(.key(0x08), down: true, source: source)
+        GuestInput.shared.state.release(source: source)
     }
 
     // Traits: keep iOS from rewriting path characters.
@@ -821,8 +905,8 @@ final class InputSettings: ObservableObject {
         if let d = try? Data(contentsOf: Self.url),
            let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] {
             relative = j["relative"] as? Bool   ?? false
-            sensAbs  = j["sensAbs"]  as? Double ?? 2.0
-            sensRel  = j["sensRel"]  as? Double ?? 2.0
+            sensAbs  = DisplayGeometry.sensitivity(j["sensAbs"] as? Double ?? 2.0)
+            sensRel  = DisplayGeometry.sensitivity(j["sensRel"] as? Double ?? 2.0)
             diagnostics = j["diagnostics"] as? Bool ?? false
         }
         loading = false
@@ -2762,6 +2846,9 @@ struct TouchControlButton: View {
     private var isStick: Bool { control.action.stickKeys != nil }
     private var isSelected: Bool { m.editing && m.selected == control.id }
 
+    @State private var inputSource = UUID()
+    @GestureState private var touching = false
+
     var body: some View {
         ZStack {
             if control.action.stickKeys != nil {
@@ -2810,6 +2897,7 @@ struct TouchControlButton: View {
                   y: CGFloat(control.ny) * screen.height)
         .gesture(
             DragGesture(minimumDistance: 0)
+                    .updating($touching) { _, active, _ in active = true }
                 .onChanged { v in
                     if m.editing {
                         m.selected = control.id
@@ -2837,6 +2925,11 @@ struct TouchControlButton: View {
                     }
                 }
         )
+        .onChange(of: touching) { _, active in if !active { cancelInput() } }
+        .onDisappear { cancelInput() }
+        .onChange(of: control.action) { _, _ in cancelInput() }
+        .onChange(of: m.editing) { _, _ in cancelInput() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in cancelInput() }
     }
 
     /// 8-way snap. Screen y grows downward, so measure clockwise from "up".
@@ -2868,8 +2961,8 @@ struct TouchControlButton: View {
     private func applyStick(_ next: Int, _ q: [Int32]) {
         guard next != stickDir else { return }
         let old = Set(stickKeys(stickDir, q)), new = Set(stickKeys(next, q))
-        for vk in old.subtracting(new) { winios_post_key(vk, 0) }
-        for vk in new.subtracting(old) { winios_post_key(vk, 1) }
+        for vk in old.subtracting(new) { GuestInput.shared.state.set(.key(vk), down: false, source: inputSource) }
+        for vk in new.subtracting(old) { GuestInput.shared.state.set(.key(vk), down: true, source: inputSource) }
         if stickDir == -1, next != -1 { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
         stickDir = next
     }
@@ -2880,11 +2973,11 @@ struct TouchControlButton: View {
         if down { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
         switch control.action {
         case .key(let vk):
-            winios_post_key(vk, down ? 1 : 0)
+            GuestInput.shared.state.set(.key(vk), down: down, source: inputSource)
         case .mouseLeft:
-            winios_pointer(0, 0, down ? 0x0002 : 0x0004, 0)   // LEFTDOWN / LEFTUP
+            GuestInput.shared.state.set(.mouse(0), down: down, source: inputSource)   // LEFTDOWN / LEFTUP
         case .mouseRight:
-            winios_pointer(0, 0, down ? 0x0008 : 0x0010, 0)   // RIGHTDOWN / RIGHTUP
+            GuestInput.shared.state.set(.mouse(1), down: down, source: inputSource)   // RIGHTDOWN / RIGHTUP
         case .keyboardToggle:
             if down { MetalBackedView.toggleKeyboard() }
         case .none, .joystickWASD, .joystickArrows:
@@ -2893,6 +2986,11 @@ struct TouchControlButton: View {
             break     // ml645: no XInput yet — deliberately inert, and labelled so
         }
     }
+    private func cancelInput() {
+        GuestInput.shared.state.release(source: inputSource)
+        isDown = false; stickDir = -1; dragBase = nil
+    }
+
 }
 
 /// ml645 — the mapping panel. Shown for the selected control in edit mode.

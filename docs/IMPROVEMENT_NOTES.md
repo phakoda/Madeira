@@ -54,3 +54,35 @@ ASan/UBSan result: **200,991 input checks; 63 existing wire checks; zero failure
 At pathological transition-only overflow, historic taps can still be lost; the
 contract is bounded memory and eventual correct held state, not lossless unbounded
 input buffering.
+
+## Touch, geometry, and display bridge
+
+On-screen controls now have source ownership: releasing one W/arrow/mouse control
+cannot release another control that still holds the same input. Gesture-state
+cancellation, disappearing/remapped controls, view detachment, and application
+focus loss release their held inputs. Trackpad touches are restricted to the
+actual input view; a finger pressing another control no longer becomes a scroll
+finger. A second finger ends an existing drag before scrolling. Cumulative travel
+prevents a slow scroll from becoming a right-click. Direct input tracks a single
+owning touch, and gesture timing uses a monotonic clock. Sensitivity and desktop
+sizes are validated before integer conversion. Software keyboard modifier taps
+participate in source ownership; non-ASCII letter expansions are no longer sent
+as misleading ASCII letters (full Unicode input remains unsupported).
+
+Presentation aspect-fits the current drawable rather than hard-coding 4:3, while
+input maps into Wine's logical desktop size. DXMT remains the sole drawableSize
+writer. The process-lifetime Metal layer is preserved across reattachment, hidden
+on detachment, and its frame changes do not implicitly animate. A lightweight
+four-times-per-second active-view check catches swapchain resolution changes;
+this timer and the idle-timer override stop on loss of focus.
+
+The macdrv display shim now owns a separate window-data record per acquisition,
+removing the shared HWND race between swapchain creators. Existing optional
+private display tuning uses signature-checked scalar invocation instead of
+passing NSNumber object pointers to BOOL/integer setters. Unsupported signatures
+are skipped. Set `MADEIRA_DISABLE_PRIVATE_DISPLAY_TUNING=1` before layer creation
+to disable that pre-existing workaround. This is not a claim of public-API-only
+or App Store compatibility; its device behavior still needs A/B validation.
+
+Portable Swift tests: **10,026 geometry and input-ownership checks passed**.
+UIKit source was syntax-parsed, not SDK-typechecked or device-tested.

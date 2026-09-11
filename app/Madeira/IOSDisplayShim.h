@@ -15,6 +15,8 @@
 // Register the CAMetalLayer that DXMT-rendered content should go into.
 // Must be called before the first D3D11 swapchain is created.
 void madeira_display_set_layer(CAMetalLayer *layer);
+// Runtime-checked scalar invocation of the pre-existing optional display tuning.
+void madeira_display_configure_layer(CAMetalLayer *layer, int refresh_rate);
 #endif
 
 #endif
