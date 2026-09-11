@@ -253,3 +253,13 @@ not compiled against an Apple SDK or tried with a physical controller here.
 Behavior references: Melo-Controller's joystick neutralization/dead zone; UTM's
 Gamepad category button-to-key/mouse mapping; Apple's WWDC19 session 616 and
 WWDC20 session 10109. No third-party implementation file was vendored.
+
+## Landscape HUD geometry follow-up
+
+Removed the second, independent 4:3 assumption in the landscape SwiftUI layout.
+The FPS/pacing controls now occupy a real 64-point trailing gutter outside the
+Metal placeholder, with horizontal safe areas retained for notches. This trades
+a small fixed strip of possible game area for controls that cannot be covered
+by a widescreen swapchain. The game itself still aspect-fits its actual drawable;
+no stretch/crop, render-resolution rewrite, or extra per-frame layout loop was
+introduced. This UI arrangement is syntax-validated, not screenshot/device-tested.

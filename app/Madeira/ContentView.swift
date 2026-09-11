@@ -1145,32 +1145,21 @@ struct ContentView: View {
         }
     }
 
-    /// Landscape: game mode. Full-height 4:3 surface centered (aspect-fit
-    /// happens in MetalBackedView); ALL controls live in the pillarbox
-    /// bars left/right of the game — the window-level surface would cover
-    /// anything drawn over the game area itself. No header/log/nav chrome.
+    /// A real trailing HUD gutter, not a guessed 4:3 pillarbox. The raw
+    /// window-level Metal host is confined to the placeholder's bounds, so
+    /// widescreen swapchains cannot paint over the readout/pacing controls.
     private var landscapeBody: some View {
-        GeometryReader { geo in
-            let gameW = min(geo.size.width, geo.size.height * 4.0 / 3.0)
-            let barW = max((geo.size.width - gameW) / 2.0, 44)
-            ZStack {
-                Color.black
-                MadeiraMetalView()
-                // Controls removed for now (ml586): game-only landscape.
-                // The FPS readout stays, pinned in the right pillarbox bar —
-                // the window-level surface covers anything drawn over the
-                // game area itself, so it cannot ride on the game view.
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    VStack {
-                        FPSOverlay(compact: true)
-                        Spacer()
-                    }
-                    .frame(width: barW)
-                }
+        HStack(spacing: 0) {
+            MadeiraMetalView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack {
+                FPSOverlay(compact: true)
+                Spacer(minLength: 0)
             }
+            .frame(width: 64)
         }
-        .ignoresSafeArea()
+        // Keep horizontal safe areas: a notch must not cover the HUD.
+        .ignoresSafeArea(.container, edges: [.top, .bottom])
         .background(Color.black)
     }
 
