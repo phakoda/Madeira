@@ -34,4 +34,10 @@ swiftc -warnings-as-errors -o "$OUT/fps-test" \
     "$ROOT/app/Madeira/FrameRateSampler.swift" "$ROOT/tests/swift/FrameRateTests.swift"
 "$OUT/fps-test"
 swiftc -frontend -parse "$ROOT/app/Madeira/FPSOverlay.swift"
+CXXFLAGS=(-std=c++17 -Wall -Wextra -Werror -g -O1 -pthread)
+if [[ "${SANITIZE:-1}" == 1 ]]; then
+    CXXFLAGS+=(-fsanitize=address,undefined -fno-omit-frame-pointer)
+fi
+"${CXX:-clang++}" "${CXXFLAGS[@]}" "$ROOT/tests/checked_arena_test.cpp" -o "$OUT/arena-test"
+"$OUT/arena-test"
 echo 'Portable suites passed.'

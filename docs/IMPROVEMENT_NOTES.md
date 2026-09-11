@@ -196,3 +196,19 @@ clock samples, and bounded history under 1,000 Hz sampling. UIKit/QuartzCore
 lifecycle and the OS memory query need device validation. References:
 Apple, *Optimize for variable refresh rate displays*, WWDC21 session 10147;
 Apple, *Profile and optimize your game's memory*, WWDC22 session 10106.
+
+## Translation bridge allocation safety
+
+The FEX bridge's bump allocator now uses checked alignment and atomic compare/
+exchange reservation. Oversized, zero, exhausted, and overflowed requests fail
+without consuming remaining capacity; the old fetch_add consumed capacity even
+on failure and could wrap. Address containment no longer adds base+capacity.
+Normal successful allocations no longer format per-allocation log lines.
+Executable-memory setup, guest ordering, code generation, cache coherency, and
+pool lifetime/reclamation policy are unchanged. This does not rebuild or alter
+the missing FEX engine submodule.
+
+**148,025 assertions passed under ASan/UBSan**, including **128,000 successful
+non-overlapping reservations on 32 threads**, overflow/alignment boundaries and
+repeated exhaustion/recovery checks. This is allocation correctness testing,
+not a measured game-FPS improvement or a ThreadSanitizer result.

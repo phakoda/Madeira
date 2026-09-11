@@ -1,3 +1,5 @@
+#include "CheckedArena.h"
+#include <cerrno>
 // FEXBridge.mm - Bridge between iOS app and FEXCore
 // Handles JIT pool allocation, mmap hooks, and FEXCore initialization
 
@@ -83,21 +85,18 @@ static size_t g_jit_pool_size = 0;
 static std::atomic<size_t> g_jit_pool_offset{0};  // Bump allocator
 static std::mutex g_jit_pool_mutex;
 
-static size_t align_up(size_t val, size_t align) {
-    return (val + align - 1) & ~(align - 1);
-}
-
-// Sub-allocate from the JIT pool. Returns RX pointer (canonical address).
+// Sub-allocate from the existing pool. Only reservation arithmetic changes;
+// executable-memory setup, guest memory ordering and cache coherency are intact.
 static void *jit_pool_alloc(size_t size) {
-    size = align_up(size, JIT_PAGE_SIZE);
-    size_t offset = g_jit_pool_offset.fetch_add(size, std::memory_order_relaxed);
-    if (offset + size > g_jit_pool_size) {
-        fex_log("JIT pool exhausted: requested %zu at offset %zu (pool size %zu)", size, offset, g_jit_pool_size);
+    Madeira::ArenaReservation reservation{};
+    if (!Madeira::reserveArena(g_jit_pool_offset, g_jit_pool_size, size,
+                              JIT_PAGE_SIZE, reservation)) {
+        errno = size ? ENOMEM : EINVAL;
+        fex_log("JIT pool allocation rejected: requested %zu (used %zu/%zu)",
+                size, g_jit_pool_offset.load(std::memory_order_relaxed), g_jit_pool_size);
         return MAP_FAILED;
     }
-    void *rx_ptr = static_cast<uint8_t*>(g_jit_rx_base) + offset;
-    fex_log("JIT pool alloc: %zu bytes at RX=%p (offset %zu/%zu)", size, rx_ptr, offset + size, g_jit_pool_size);
-    return rx_ptr;
+    return static_cast<uint8_t*>(g_jit_rx_base) + reservation.offset;
 }
 
 // Check if an address is in the JIT pool RX range
@@ -105,7 +104,7 @@ static bool is_in_jit_pool(void *addr) {
     if (!g_jit_rx_base) return false;
     uintptr_t a = reinterpret_cast<uintptr_t>(addr);
     uintptr_t base = reinterpret_cast<uintptr_t>(g_jit_rx_base);
-    return a >= base && a < base + g_jit_pool_size;
+    return Madeira::arenaContainsAddress(base, g_jit_pool_size, a);
 }
 
 // Initialize the JIT pool using Strategy 2 (debugger-allocated RX + vm_remap RW)
