@@ -10,6 +10,11 @@
 #ifndef IOS_DISPLAY_SHIM_H
 #define IOS_DISPLAY_SHIM_H
 
+#include <stdint.h>
+// Live OS estimate, or UINT64_MAX on unsupported platforms. Not a fixed
+// termination threshold and not a guarantee that an allocation will succeed.
+uint64_t madeira_available_process_memory_bytes(void);
+
 #ifdef __OBJC__
 #import <QuartzCore/CAMetalLayer.h>
 // Register the CAMetalLayer that DXMT-rendered content should go into.

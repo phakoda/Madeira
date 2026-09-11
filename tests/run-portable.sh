@@ -30,4 +30,8 @@ swiftc -frontend -parse "$ROOT/app/Madeira/LogStore.swift"
 "$CC" "${CFLAGS[@]}" "$ROOT/tests/prefix_extractor_driver.c" \
     "$ROOT/app/Madeira/PrefixExtractor.c" -lz -o "$OUT/prefix-test"
 python3 "$ROOT/tests/test_prefix_extractor.py" "$OUT/prefix-test"
+swiftc -warnings-as-errors -o "$OUT/fps-test" \
+    "$ROOT/app/Madeira/FrameRateSampler.swift" "$ROOT/tests/swift/FrameRateTests.swift"
+"$OUT/fps-test"
+swiftc -frontend -parse "$ROOT/app/Madeira/FPSOverlay.swift"
 echo 'Portable suites passed.'

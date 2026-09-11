@@ -168,3 +168,31 @@ directories). Tests cover long names, corrupt headers/trailers, truncation,
 partial-seed recovery, preserved user data, links, conflicting file types,
 resource limits, and missing/empty essential prefix files. Objective-C startup
 integration still requires an Apple build and a fresh-prefix device test.
+
+## Honest, lower-overhead performance telemetry
+
+The overlay now has one 250 ms sampler/publication timer instead of separate
+100 ms sample and 250 ms display timers. Hidden overlays stop sampling; inactive
+or detached views release their refresh request. Per-view refresh leases prevent
+rotation teardown from cancelling a newly attached overlay's request. Requested
+refresh ranges are bounded by the screen's reported maximum; power/thermal
+policy can still lower actual refresh. The pacing button no longer shares its
+tap handler with hiding the readout.
+
+The production FPS sampler uses monotonic time, bounded history, and reset/wrap
+handling, not wrapping unsigned subtraction. Tests also exposed a low-FPS bias
+in the old "stop at the third change" window: three frames in a cherry-picked
+2.25 seconds could show 1.33 FPS for a 1 FPS stream. Duration-based adaptation
+avoids that bias. The counter measures guest presents, not physical scanouts.
+
+Memory warning colors use the OS's live process-available-memory estimate,
+not a hard-coded 4 GiB jetsam limit. Failed footprint readings are shown as
+unknown rather than zero. Available memory is an estimate, never a guarantee
+that a particular allocation will succeed or a fixed termination threshold.
+
+**110,208 portable sampler assertions passed**, covering steady 19/60/120 FPS,
+1 FPS, stalls, count reset and UInt64 rollover, duplicate/invalid/backwards
+clock samples, and bounded history under 1,000 Hz sampling. UIKit/QuartzCore
+lifecycle and the OS memory query need device validation. References:
+Apple, *Optimize for variable refresh rate displays*, WWDC21 session 10147;
+Apple, *Profile and optimize your game's memory*, WWDC22 session 10106.

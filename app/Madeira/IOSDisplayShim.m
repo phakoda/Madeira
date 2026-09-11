@@ -12,6 +12,18 @@
 #import <pthread.h>
 
 #include "IOSDisplayShim.h"
+#include <TargetConditionals.h>
+#if TARGET_OS_IOS && !TARGET_OS_MACCATALYST
+#include <os/proc.h>
+#endif
+
+uint64_t madeira_available_process_memory_bytes(void) {
+#if TARGET_OS_IOS && !TARGET_OS_MACCATALYST
+    return (uint64_t)os_proc_available_memory();
+#else
+    return UINT64_MAX;
+#endif
+}
 
 // --- Types mirroring DXMT's expectations (see winemetal_unix.c lines ~1524) ---
 
