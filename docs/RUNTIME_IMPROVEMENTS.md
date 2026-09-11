@@ -125,3 +125,33 @@ to 1024 × 1024 (4 MiB per submitted image); hotspots are bounded. Failed
 CoreGraphics allocations now stop cleanly. Hide/show state survives creation of
 the cursor layer. Core Animation behavior and visual appearance need device
 validation; cursor image-shape jobs themselves are not mailbox-coalesced.
+
+
+## Native build integrity
+
+The ntdll build used to archive and publish even when compilation had failed,
+allowing old object files to conceal errors. Several native scripts also reused
+object directories/archive members after a source had been removed. These are
+correctness problems: a successful-looking build could run different code from
+what is checked into Git.
+
+The ntdll, win32u, wineserver-patch and DXMT scripts now build in fresh, isolated
+object directories. Compiler failures stop publication. A shared helper verifies
+that the result is a nonempty regular archive, then copies to a temporary file
+beside the destination and atomically renames it. Failed staging directories keep
+compiler diagnostics; successful ones are cleaned. Win32u merges FreeType into a
+separate archive rather than overwriting an input archive. DXMT uses shell arrays
+for flags and includes, and ntdll/win32u source paths are quoted, including paths
+containing spaces. No dependency versions, optimization levels, or FEX memory
+ordering settings were changed.
+
+An offline regression suite executes the production shell scripts and real `ar`,
+with deliberately mocked compilers/SDKs. It verifies ntdll/DXMT failure and success,
+stale-object exclusion, diagnostics retention, paths containing spaces, invalid
+archives, and copy/archive failures. Its 49 checks passed. The common publication
+helper is tested directly; the complete win32u/wineserver orchestration is not
+exercised by that suite. This is not evidence of a successful Apple native build.
+Wineserver remains a patch-on-existing-library build, not a clean full-source
+reconstruction. Concurrent successful builds can publish in either completion
+order (last completed publication wins), but cannot publish a partially copied
+library.

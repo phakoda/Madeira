@@ -3,7 +3,7 @@
 # static library, for linking into Madeira.app.
 #
 # Produces: libdxmt_unix.a
-set -eu
+set -euo pipefail
 
 BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$BUILD_DIR/../.." && pwd)"
@@ -12,18 +12,18 @@ DXMT_ROOT="$REPO_ROOT/research/dxmt"
 LLVM_SRC="$REPO_ROOT/toolchains/llvm-project/llvm"
 LLVM_BUILD="$REPO_ROOT/toolchains/llvm-ios-build"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-OBJ_DIR="$BUILD_DIR/obj"
+source "$REPO_ROOT/build/native-build-common.sh"
+madeira_begin_native_build
 OUT_LIB="$BUILD_DIR/libdxmt_unix.a"
 
-mkdir -p "$OBJ_DIR"
 
-COMMON_FLAGS="-arch arm64 -isysroot $SDK -miphoneos-version-min=18.0 -fblocks -O2"
-INCLUDES="-I$DXMT_ROOT/include -I$DXMT_ROOT/libs -I$DXMT_SRC/winemetal -I$DXMT_SRC/airconv"
-INCLUDES_DIRECTX="-I$DXMT_ROOT/include/native/directx -I$DXMT_ROOT/include/native/windows"
-INCLUDES_SHADERS="-I$BUILD_DIR/shader-headers"
-LLVM_INCLUDES="-I$LLVM_BUILD/include -I$LLVM_SRC/include"
-AIRCONV_DEFS="-D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS"
-CXX_FLAGS="-std=c++20 -fno-exceptions -fno-rtti"
+COMMON_FLAGS=("-arch" "arm64" "-isysroot" "$SDK" "-miphoneos-version-min=18.0" "-fblocks" "-O2")
+INCLUDES=("-I$DXMT_ROOT/include" "-I$DXMT_ROOT/libs" "-I$DXMT_SRC/winemetal" "-I$DXMT_SRC/airconv")
+INCLUDES_DIRECTX=("-I$DXMT_ROOT/include/native/directx" "-I$DXMT_ROOT/include/native/windows")
+INCLUDES_SHADERS=("-I$BUILD_DIR/shader-headers")
+LLVM_INCLUDES=("-I$LLVM_BUILD/include" "-I$LLVM_SRC/include")
+AIRCONV_DEFS=("-D_FILE_OFFSET_BITS=64" "-D__STDC_CONSTANT_MACROS" "-D__STDC_FORMAT_MACROS" "-D__STDC_LIMIT_MACROS")
+CXX_FLAGS=("-std=c++20" "-fno-exceptions" "-fno-rtti")
 
 SUCCEEDED=0
 FAILED=0
@@ -32,7 +32,7 @@ FAILED_FILES=""
 compile_objc() {
     local src=$1 name=$2
     printf "  %-40s " "$name"
-    if xcrun -sdk iphoneos clang $COMMON_FLAGS -x objective-c $INCLUDES \
+    if xcrun -sdk iphoneos clang "${COMMON_FLAGS[@]}" -x objective-c "${INCLUDES[@]}" \
         -c "$src" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"; SUCCEEDED=$((SUCCEEDED+1))
     else
@@ -41,9 +41,10 @@ compile_objc() {
 }
 
 compile_cxx() {
-    local src=$1 name=$2 extra="${3:-}"
+    local src=$1 name=$2
+    shift 2
     printf "  %-40s " "$name"
-    if xcrun -sdk iphoneos clang++ $COMMON_FLAGS $CXX_FLAGS $INCLUDES $INCLUDES_DIRECTX $INCLUDES_SHADERS $LLVM_INCLUDES $AIRCONV_DEFS $extra \
+    if xcrun -sdk iphoneos clang++ "${COMMON_FLAGS[@]}" "${CXX_FLAGS[@]}" "${INCLUDES[@]}" "${INCLUDES_DIRECTX[@]}" "${INCLUDES_SHADERS[@]}" "${LLVM_INCLUDES[@]}" "${AIRCONV_DEFS[@]}" "$@" \
         -c "$src" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"; SUCCEEDED=$((SUCCEEDED+1))
     else
@@ -72,8 +73,8 @@ for cpp in BlobContainer.cpp DXBCUtils.cpp ShaderBinary.cpp; do
     name=dxbc_$(basename "$cpp" .cpp)
     # ShaderBinary uses `throw`, so we can't use -fno-exceptions from CXX_FLAGS.
     printf "  %-40s " "$name"
-    if xcrun -sdk iphoneos clang++ $COMMON_FLAGS -std=c++20 -fno-rtti \
-            $INCLUDES $INCLUDES_DIRECTX $AIRCONV_DEFS \
+    if xcrun -sdk iphoneos clang++ "${COMMON_FLAGS[@]}" -std=c++20 -fno-rtti \
+            "${INCLUDES[@]}" "${INCLUDES_DIRECTX[@]}" "${AIRCONV_DEFS[@]}" \
             -c "$DXMT_ROOT/libs/DXBCParser/$cpp" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"; SUCCEEDED=$((SUCCEEDED+1))
     else
@@ -91,5 +92,6 @@ fi
 
 echo ""
 echo "=== Archiving libdxmt_unix.a ==="
-xcrun -sdk iphoneos ar rcs "$OUT_LIB" "$OBJ_DIR"/*.o
+xcrun -sdk iphoneos ar rcs "$OBJ_DIR/libdxmt_unix.a" "$OBJ_DIR"/*.o
+madeira_publish_archive "$OBJ_DIR/libdxmt_unix.a" "$OUT_LIB"
 echo "Built: $OUT_LIB ($(wc -c < "$OUT_LIB" | tr -d ' ') bytes)"

@@ -126,3 +126,7 @@ research/remote-metal/guest/rmreplay
 research/remote-metal/guest/rmres
 research/remote-metal/guest/rmclient_test
 research/remote-metal/host/rmetald
+
+# Transactional native build scratch (failed builds keep logs here).
+build/**/.objects.*
+.*.a.publish.*

@@ -1,15 +1,15 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$BUILD_DIR/../.." && pwd)"
 WINE_SRC="$REPO_ROOT/wine"
 WINE_BUILD="$WINE_SRC/build-macos"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-OBJ_DIR="$BUILD_DIR/obj"
+source "$REPO_ROOT/build/native-build-common.sh"
+madeira_begin_native_build
 APP_LIB="$REPO_ROOT/app/Madeira/libntdll_unix.a"
 
-mkdir -p "$OBJ_DIR"
 
 SUCCEEDED=0
 FAILED=0
@@ -83,9 +83,8 @@ compile_unixlib() {
 
 echo "=== Building ntdll unix (iOS) ==="
 
-# iOS-Madeira 2026-05-13: silent audio driver — provides a null
-# IAudioClock that advances at real time so FMOD's audio-gated rhythm
-# logic in Thumper et al. advances past intro music.
+# RemoteIO audio driver with bounded render ring, volume, and a clock-only
+# fallback. Rebuild this object to include the runtime audio improvements.
 compile_one "$BUILD_DIR/audio_null_ios.c" "audio_null_ios"
 
 # iOS-Madeira 2026-07-05 (Steam S0): network + crypto unix sides.
@@ -116,7 +115,7 @@ compile_unixlib "$CRYPTO_DIR/crypt32_unixlib_ios.c" "crypt32_unixlib" "crypt32" 
 # tables (nsiproxy.sys is not shipped; PE nsi.dll falls back to this).
 compile_one "$BUILD_DIR/nsi_unixlib_ios.c" "nsi_unixlib_ios"
 
-for src in $WINE_SRC/dlls/ntdll/unix/*.c; do
+for src in "$WINE_SRC"/dlls/ntdll/unix/*.c; do
     name=$(basename "$src" .c)
 
     # Use patched versions for specific files
@@ -156,6 +155,10 @@ echo "Results: $SUCCEEDED succeeded, $FAILED failed"
 if [ -n "$FAILED_FILES" ]; then
     echo "Failed:$FAILED_FILES"
 fi
+if [ "$FAILED" -gt 0 ]; then
+    echo "Not archiving or publishing: compilation failed. See $OBJ_DIR/*.err" >&2
+    exit 1
+fi
 
 echo ""
 echo "=== Building libntdll_unix.a ==="
@@ -172,6 +175,6 @@ ar rcs "$OBJ_DIR/libntdll_unix.a" \
     "$OBJ_DIR/tape.o" "$OBJ_DIR/thread.o" "$OBJ_DIR/virtual.o"
 
 echo "Copying to app..."
-cp "$OBJ_DIR/libntdll_unix.a" "$APP_LIB"
+madeira_publish_archive "$OBJ_DIR/libntdll_unix.a" "$APP_LIB"
 echo "libntdll_unix.a: $(wc -c < "$APP_LIB" | tr -d ' ') bytes"
 echo "Done!"

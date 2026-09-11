@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$BUILD_DIR/../.." && pwd)"
@@ -9,8 +9,8 @@ APP_LIB="$REPO_ROOT/app/Madeira/libwineserver.a"
 SHIMS_DIR="$REPO_ROOT/build/ntdll-unix/shims"
 
 # Object files and library go in build dir
-OBJ_DIR="$BUILD_DIR/obj"
-mkdir -p "$OBJ_DIR"
+source "$REPO_ROOT/build/native-build-common.sh"
+madeira_begin_native_build
 
 # Copy the base library if we don't have one yet
 if [ ! -f "$OBJ_DIR/libwineserver.a" ]; then
@@ -221,5 +221,5 @@ rm -rf "$TMP_RENAME_DIR"
 echo "  symbol rename + repack OK"
 
 echo "Copying to app..."
-cp "$OBJ_DIR/libwineserver.a" "$APP_LIB"
+madeira_publish_archive "$OBJ_DIR/libwineserver.a" "$APP_LIB"
 echo "Done! libwineserver.a: $(wc -c < "$APP_LIB" | tr -d ' ') bytes"

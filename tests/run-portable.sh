@@ -58,4 +58,5 @@ swiftc -warnings-as-errors -o "$OUT/controller-keyboard-test" \
 bash "$ROOT/tests/run-mouse-tests.sh"
 python3 "$ROOT/tests/test_remote_runner.py"
 python3 "$ROOT/tests/test_template_tools.py"
+python3 "$ROOT/tests/test_native_builds.py"
 echo 'Portable suites passed.'
