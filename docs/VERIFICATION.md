@@ -1,5 +1,11 @@
 # Verification report — Madeira iOS improvement pass
 
+> Historical report for the supplied `improvements/ios-stability` pass. For the
+> additional changes and current results, see [Runtime quality pass](RUNTIME_IMPROVEMENTS.md)
+> and [Native build handoff](NATIVE_BUILD_HANDOFF.md). The results below remain
+> scoped to their original revision.
+
+
 ## Read this first
 
 This is a **source-code update**, not a newly built IPA or a device compatibility

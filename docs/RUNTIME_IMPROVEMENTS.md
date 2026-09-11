@@ -3,6 +3,73 @@
 Starting point: `9f492bc`, preserving the supplied `improvements/ios-stability`
 history. New branch: `improvements/runtime-quality`.
 
+## Delivery and verification summary
+
+This is a source update, **not a newly built or device-tested IPA**. The final
+executable source/tests were checked at `2995da60381a4edc97389df663728fc6c75d5338`;
+the later handoff/documentation commit adds no executable changes. The host is
+Linux x86_64 with Clang 17.0.0, Swift 6.2.1 and Python 3.13.5. It has no Apple SDK,
+Xcode, iOS device or Metal runtime. Existing input artifacts and engine pins are
+preserved; missing engines/native libraries were not silently replaced.
+
+Both full-suite runs passed:
+
+| Executed suite | Sanitized-run checks | Unsanitized-run checks |
+| --- | ---: | ---: |
+| Remote-Metal portable wire/decoder | 63 | 63 |
+| Input queue | 200,991 | 200,991 |
+| Cursor mailbox and image bounds | 102,087 | 102,087 |
+| Surface layout/mailbox | 20,157 | 20,157 |
+| Audio driver, mocked Apple/Nt boundaries | 1,308,168 | 1,261,131 |
+| Geometry/input ownership | 10,026 | 10,026 |
+| Logging | 1,061 | 1,061 |
+| Prefix installation | 850 | 850 |
+| Frame-rate sampling | 110,208 | 110,208 |
+| Checked arena | 148,025 | 148,025 |
+| Controller/keyboard | 121,928 | 121,928 |
+| Physical mouse and production pointer routing | 200,054 | 200,054 |
+| Remote-runner failure behavior | 17 | 17 |
+| Template tooling | 7 | 7 |
+| Native build orchestration, mocked compiler/SDK | 49 | 49 |
+
+Counts include loop/stress assertions, not that many independent scenarios or
+games. The audio count depends on host scheduling and underrun frequency; both
+runs transfer and verify one million sequenced frames. C/C++ use ASan/UBSan in
+the first run; Swift is compiled with warnings as errors, not those sanitizers.
+The second run disables sanitizers but retains `-O1`; it is not a Release
+performance benchmark. No ThreadSanitizer run is claimed.
+
+Raw output: [sanitized](validation/runtime-portable-asan.txt) and
+[unsanitized](validation/runtime-portable-nosan.txt). All 19 project Swift sources
+also passed syntax parsing and source-membership checks. Modified shell scripts
+passed `bash -n`; `git diff --check` and a standalone `git fsck --full` passed.
+A combined validation command initially reached its time limit after the full
+unsanitized suite passed; the standalone Git integrity retry completed normally.
+
+For the missing inputs, native rebuild steps and Apple checks, read
+[the native build handoff](NATIVE_BUILD_HANDOFF.md). For unexecuted hardware
+acceptance cases, use [the device checklist](DEVICE_VALIDATION.md). The earlier
+[verification report](VERIFICATION.md) describes only the supplied prior pass.
+
+## New commit sequence
+
+The implementation was committed in stages, not flattened into one final diff:
+
+```
+f44c0de fix(input): qualify shared cursor in controller pointer routing
+ef8deee fix(audio): enforce format, buffer, allocation and stream lifecycle contracts
+f2c5871 feat(audio): implement volume, bounded realtime rendering and underrun-safe clocks
+e9891f3 feat(input): add surface-scoped physical mice with owned buttons and precise motion
+113382b perf(cursor): coalesce background moves and avoid redundant main-queue dispatch
+6ec746c fix(build): isolate native objects and publish archives transactionally
+2995da6 test: exercise production pointer routing and add Apple audio validation gate
+```
+
+A final documentation commit records the complete results and handoff. The
+archive includes `.git`, original branches/history and the current branch, so
+`git log 9f492bc..HEAD` and `git diff 9f492bc..HEAD` show this pass independently.
+No commits were pushed to an external repository.
+
 ## Controller compile fix
 
 Qualified the shared `MetalBackedView.cursor` with `Self` inside the controller

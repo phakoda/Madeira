@@ -7,14 +7,25 @@ Madeira combines [Wine](https://www.winehq.org/) (ARM64EC),
 [DXMT](https://github.com/3Shain/DXMT) for D3D11 → Metal, running as a single
 Mach process on iOS with wineserver as a thread rather than a separate process.
 
-## Source improvement pass
+## Source improvement passes
 
-The `improvements/ios-stability` branch preserves the supplied history and adds
-input, display/compositor, logging, prefix-installation, allocation and validation
-changes. Start with [the verification report](docs/VERIFICATION.md) and
-[implementation notes](docs/IMPROVEMENT_NOTES.md). Run the host regression suite
-with `bash tests/run-portable.sh`; [device checks](docs/DEVICE_VALIDATION.md) remain
-separate. This archive is a source update, not a newly built/device-tested IPA.
+The current `improvements/runtime-quality` branch preserves the uploaded
+`improvements/ios-stability` history and adds audio contract/volume/clock fixes,
+opt-in physical mouse input, cursor scheduling improvements, safer native library
+publication, and regression coverage. Start with [the runtime report](docs/RUNTIME_IMPROVEMENTS.md)
+and [native build handoff](docs/NATIVE_BUILD_HANDOFF.md). The archive includes the
+complete Git history, not just an exported source tree.
+
+Run `bash tests/run-portable.sh` for the host suite. Both sanitizer-enabled and
+unsanitized runs passed; that does not certify Apple's frameworks or hardware.
+This is a source update, **not a newly built/device-tested IPA**. The supplied
+engine submodules and several app-linked libraries are missing; see the handoff
+before expecting a native build. Audio changes require rebuilding ntdll.
+
+The earlier [verification report](docs/VERIFICATION.md) and
+[implementation notes](docs/IMPROVEMENT_NOTES.md) document the prior input,
+display/compositor, logging, prefix-installation and allocation work.
+[Device acceptance checks](docs/DEVICE_VALIDATION.md) remain separate.
 
 ## Upstream status (from the supplied snapshot)
 
