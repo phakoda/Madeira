@@ -107,9 +107,9 @@ final class MetalBackedView: UIView, ControllerPointerTarget {
         if InputSettings.shared.relative {
             winios_pointer(dx, dy, 0x0001, 0)
         } else {
-            cursor.x = min(max(cursor.x + CGFloat(dx), 0), guestSize.width - 1)
-            cursor.y = min(max(cursor.y + CGFloat(dy), 0), guestSize.height - 1)
-            winios_pointer(Int32(cursor.x), Int32(cursor.y), 0x8001, 0)
+            Self.cursor.x = min(max(Self.cursor.x + CGFloat(dx), 0), guestSize.width - 1)
+            Self.cursor.y = min(max(Self.cursor.y + CGFloat(dy), 0), guestSize.height - 1)
+            winios_pointer(Int32(Self.cursor.x), Int32(Self.cursor.y), 0x8001, 0)
         }
     }
     override var canBecomeFirstResponder: Bool { true }
