@@ -105,3 +105,23 @@ multiple-mouse ownership, stale callback rejection, side-button payloads and
 fractional wheel input. These tests do not certify Apple's real API availability,
 UIKit hover ordering, external hardware or OS pointer behavior. Use the genuine
 Apple-SDK typecheck and device matrix before distribution.
+
+## Cursor rendering overhead and bounds
+
+Absolute movement from the main/UI thread now places the cursor directly instead
+of allocating another dispatch block per sample. Wine-thread motion is coalesced
+into a latest-position mailbox with at most one queued UI wake-up. A queued task
+cannot replay an older position over a newer inline update. This affects visual
+cursor placement only; guest clicks, key transitions and motion ordering remain
+in the existing native input queue.
+
+The production scheduling/layout policy passes 102,087 sanitizer checks,
+including 200,000 publishes from eight threads that require only one queued
+wake-up. This is a measured task-count reduction for a blocked-UI burst, not a
+game-FPS or frame-latency measurement.
+
+Cursor image dimensions are checked before byte/stride arithmetic and limited
+to 1024 × 1024 (4 MiB per submitted image); hotspots are bounded. Failed
+CoreGraphics allocations now stop cleanly. Hide/show state survives creation of
+the cursor layer. Core Animation behavior and visual appearance need device
+validation; cursor image-shape jobs themselves are not mailbox-coalesced.

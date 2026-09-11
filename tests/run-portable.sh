@@ -19,6 +19,8 @@ fi
     "$ROOT/research/remote-metal/schema/wire_test.c" -o "$OUT/wire-test"
 "$OUT/wire-test"
 "$CC" "${CFLAGS[@]}" "$ROOT/tests/input_queue_test.c" -o "$OUT/input-test"
+"$CC" "${CFLAGS[@]}" -pthread "$ROOT/tests/cursor_mailbox_test.c" -o "$OUT/cursor-test"
+"$OUT/cursor-test"
 "$OUT/input-test"
 "$CC" "${CFLAGS[@]}" "$ROOT/tests/surface_queue_test.c" -o "$OUT/surface-queue-test"
 "$OUT/surface-queue-test"

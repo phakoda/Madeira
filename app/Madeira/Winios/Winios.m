@@ -1264,7 +1264,11 @@ static void winios_present_queued(HWND hwnd, uint64_t ticket) {
  * S2 trackpad pointer + rendered cursor
  * ============================================================ */
 
+#include "CursorMailbox.h"
 static CALayer *g_cursor_layer;
+static BOOL g_cursor_visible = YES; /* main thread; survives show/hide before layer creation */
+static madeira_cursor_mailbox g_cursor_mailbox;
+static pthread_mutex_t g_cursor_mailbox_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static UIImage *winios_cursor_image(void) {
     static UIImage *img;
@@ -1303,6 +1307,7 @@ static void winios_ensure_cursor_layer(void) {
     UIImage *img = winios_cursor_image();
     g_cursor_layer = [CALayer layer];
     g_cursor_layer.actions = winios_no_animation_actions();
+    g_cursor_layer.hidden = !g_cursor_visible;
     g_cursor_layer.zPosition = 10000;   /* above every window layer */
     g_cursor_layer.anchorPoint = CGPointMake(0, 0);
     g_cursor_layer.contents = (id)img.CGImage;
@@ -1326,31 +1331,58 @@ static void winios_cursor_place(void) {
     }
 }
 
+/* Main-thread callers do not bounce through dispatch_async for every sample.
+ * Wine-thread bursts retain only the latest visual position; guest input itself
+ * still travels through the ordered input queue, including every button edge. */
+static void winios_apply_cursor_position(int x, int y) {
+    g_cursor_pos_px = CGPointMake(x, y);
+    winios_ensure_compositor();
+    if (!g_compositor_view) return;
+    winios_ensure_cursor_layer();
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    winios_cursor_place();
+    [CATransaction commit];
+}
+
 void winios_cursor_move(int x, int y) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        winios_ensure_compositor();
-        if (!g_compositor_view) return;
-        winios_ensure_cursor_layer();
-        g_cursor_pos_px = CGPointMake(x, y);
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        winios_cursor_place();
-        [CATransaction commit];
-    });
+    bool on_main = [NSThread isMainThread], apply = false;
+    int px = 0, py = 0;
+    pthread_mutex_lock(&g_cursor_mailbox_lock);
+    bool schedule = madeira_cursor_publish(&g_cursor_mailbox, x, y, on_main);
+    if (on_main) {
+        apply = madeira_cursor_take(&g_cursor_mailbox, false, &px, &py);
+    } else if (schedule) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            int next_x = 0, next_y = 0;
+            pthread_mutex_lock(&g_cursor_mailbox_lock);
+            bool found = madeira_cursor_take(&g_cursor_mailbox, true, &next_x, &next_y);
+            pthread_mutex_unlock(&g_cursor_mailbox_lock);
+            if (found) winios_apply_cursor_position(next_x, next_y);
+        });
+    }
+    pthread_mutex_unlock(&g_cursor_mailbox_lock);
+    if (apply) winios_apply_cursor_position(px, py);
 }
 
 /* Called from winios_drv_set_cursor (wine thread) with a straight-alpha
  * BGRA image + hotspot whenever the wine cursor changes (arrow → I-beam
  * → resize arrows → app cursors). Copy before returning. */
 void winios_cursor_set(unsigned int cur_id, int w, int h, int hot_x, int hot_y, const void *bgra) {
-    if (w <= 0 || h <= 0 || !bgra) return;
-    NSData *data = [NSData dataWithBytes:bgra length:(size_t)w * h * 4];
+    size_t bytes;
+    if (!bgra || !madeira_cursor_layout(w, h, &bytes)) return;
+    hot_x = MAX(0, MIN(w - 1, hot_x));
+    hot_y = MAX(0, MIN(h - 1, hot_y));
+    NSData *data = [NSData dataWithBytes:bgra length:bytes];
+    if (!data) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         winios_ensure_compositor();
         if (!g_compositor_view) return;
         winios_ensure_cursor_layer();
         CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+        if (!cs) return;
         CGDataProviderRef dp = CGDataProviderCreateWithCFData((__bridge CFDataRef)data);
+        if (!dp) { CGColorSpaceRelease(cs); return; }
         CGImageRef img = CGImageCreate(w, h, 8, 32, w * 4, cs,
                                        kCGBitmapByteOrder32Little | kCGImageAlphaFirst,
                                        dp, NULL, false, kCGRenderingIntentDefault);
@@ -1370,7 +1402,8 @@ void winios_cursor_set(unsigned int cur_id, int w, int h, int hot_x, int hot_y, 
 
 void winios_cursor_show(int show) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (g_cursor_layer) g_cursor_layer.hidden = !show;
+        g_cursor_visible = show != 0;
+        if (g_cursor_layer) g_cursor_layer.hidden = !g_cursor_visible;
     });
 }
 
