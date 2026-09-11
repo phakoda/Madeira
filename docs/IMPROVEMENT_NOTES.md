@@ -212,3 +212,44 @@ the missing FEX engine submodule.
 non-overlapping reservations on 32 threads**, overflow/alignment boundaries and
 repeated exhaustion/recovery checks. This is allocation correctness testing,
 not a measured game-FPS improvement or a ThreadSanitizer result.
+
+## Optional physical controls and held hardware keys
+
+Added a public-GameController keyboard/mouse preset, **off by default**. Enable
+it from the game-controller menu in the portrait navigation bar; configure
+look speed/dead zone there before rotating. It recognizes already paired
+extended-gamepad controllers, not new Bluetooth pairing or native guest XInput.
+Left stick is WASD; right stick is mouse motion; D-pad is arrows; positional
+A/B/X/Y are Space/Ctrl/E/R; LT/RT are right/left mouse; LB/RB are Q/F; L3/R3 are
+Shift/C; Menu/Options are Escape/Tab when present. Home/Guide remains untouched.
+Use the existing Relative pointer mode for games needing relative mouse look.
+
+Continuous look integrates monotonic elapsed time, carries subpixel movement,
+normalizes diagonals and stops its display link inside the radial dead zone.
+Catch-up after stalls is limited to 50 ms. Digital stick hysteresis prevents
+boundary chatter. Every physical button has its own input owner. Disconnect,
+disable, loss of app focus, host modal detection and display detachment release
+those owners without releasing touch or other controllers. Old binding callbacks
+cannot reactivate detached sessions. Re-press/recenter controls after switching
+capture/preset/dead zone. Modal detection uses the host's presentation/focus
+state and a four-Hz check; this is not a guarantee about arbitrary overlay UI.
+
+The guest input view now handles physical key-down/up/cancel events separately
+from software-keyboard character taps. Tap the keyboard button to focus it.
+Unrecognized usages fall through to UIKit. US-layout letters/digits, punctuation,
+function keys, keypad, navigation and modifiers are mapped. Left/right modifiers
+keep distinct owners but use the existing bridge's generic Shift/Ctrl/Alt VKs;
+this is not side-specific modifier emulation, Unicode/IME support, or a new HID
+backend. Repeated key-down callbacks are forwarded without adding owners;
+system-level auto-repeat cadence and reserved shortcuts still need device tests.
+Toolbar taps now also own their delayed release, so an old timer cannot release
+a newer physical/touch press.
+
+**121,928 portable assertions passed** on the production controller math and
+keyboard ownership helpers: 30/60/120/240 Hz motion equivalence, radial response,
+subpixel/stall/invalid-value handling, key maps, repeats, disconnect, shared keys,
+and stale delayed releases. New UIKit/GameController handlers were syntax-parsed,
+not compiled against an Apple SDK or tried with a physical controller here.
+Behavior references: Melo-Controller's joystick neutralization/dead zone; UTM's
+Gamepad category button-to-key/mouse mapping; Apple's WWDC19 session 616 and
+WWDC20 session 10109. No third-party implementation file was vendored.

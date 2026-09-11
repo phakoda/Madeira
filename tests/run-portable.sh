@@ -40,4 +40,9 @@ if [[ "${SANITIZE:-1}" == 1 ]]; then
 fi
 "${CXX:-clang++}" "${CXXFLAGS[@]}" "$ROOT/tests/checked_arena_test.cpp" -o "$OUT/arena-test"
 "$OUT/arena-test"
+swiftc -warnings-as-errors -o "$OUT/controller-keyboard-test" \
+    "$ROOT/app/Madeira/ControllerMath.swift" "$ROOT/app/Madeira/HardwareKeyboardState.swift" \
+    "$ROOT/app/Madeira/GuestInputState.swift" "$ROOT/tests/swift/ControllerKeyboardTests.swift"
+"$OUT/controller-keyboard-test"
+swiftc -frontend -parse "$ROOT/app/Madeira/PhysicalControllerBridge.swift"
 echo 'Portable suites passed.'

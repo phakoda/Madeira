@@ -31,6 +31,13 @@ final class GuestInputState {
         if wasDown != isDown { send(control, isDown) }
     }
 
+    /// A repeat is not a new owner and cannot resurrect a released key.
+    func repeatKey(_ vk: Int32, source: UUID) {
+        let control = Control.key(vk)
+        guard control.valid, owners[control]?.contains(source) == true else { return }
+        send(control, true)
+    }
+
     func release(source: UUID) {
         // Copy keys before mutating the dictionary; callbacks never observe a
         // partially removed owner set for the same control.

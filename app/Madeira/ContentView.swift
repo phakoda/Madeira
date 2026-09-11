@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import QuartzCore
 import Metal
+import GameController
 import os.log
 
 // 2026-07-03 window-hosted Metal layer.
@@ -56,7 +57,7 @@ final class MetalHostView: UIView {
 }
 
 // SwiftUI-hosted placeholder: geometry + touch input only.
-final class MetalBackedView: UIView {
+final class MetalBackedView: UIView, ControllerPointerTarget {
     private static var layerRegistered = false
 
     // Hardware keyboard bridge: the view becomes first responder so the iOS
@@ -65,6 +66,52 @@ final class MetalBackedView: UIView {
     // → WM_KEYDOWN/WM_CHAR). Lets the user type into Windows dialogs (e.g.
     // Run) directly instead of relying on the browse list.
     static weak var keyboardTarget: MetalBackedView?
+    private lazy var hardwareKeyboard = HardwareKeyboardState(input: GuestInput.shared.state)
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var unhandled: Set<UIPress> = []
+        for press in presses {
+            guard let key = press.key, hardwareKeyboard.press(usage: Int(key.keyCode.rawValue)) else {
+                unhandled.insert(press); continue
+            }
+        }
+        // Do not also feed handled keys through UIKeyInput.insertText: that
+        // would produce duplicate characters and prematurely release held keys.
+        if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
+    }
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var unhandled: Set<UIPress> = []
+        for press in presses {
+            guard let key = press.key, hardwareKeyboard.release(usage: Int(key.keyCode.rawValue)) else {
+                unhandled.insert(press); continue
+            }
+        }
+        if !unhandled.isEmpty { super.pressesEnded(unhandled, with: event) }
+    }
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        hardwareKeyboard.releaseAll()
+        super.pressesCancelled(presses, with: event)
+    }
+    @discardableResult override func resignFirstResponder() -> Bool {
+        hardwareKeyboard.releaseAll()
+        return super.resignFirstResponder()
+    }
+    @objc private func keyboardDisconnected() { hardwareKeyboard.releaseAll() }
+
+    var controllerCaptureAllowed: Bool {
+        guard let window, Self.keyboardTarget === self, window.isKeyWindow,
+              window.windowScene?.activationState == .foregroundActive else { return false }
+        return window.rootViewController?.presentedViewController == nil
+    }
+    func moveControllerPointer(dx: Int32, dy: Int32) {
+        if InputSettings.shared.relative {
+            winios_pointer(dx, dy, 0x0001, 0)
+        } else {
+            cursor.x = min(max(cursor.x + CGFloat(dx), 0), guestSize.width - 1)
+            cursor.y = min(max(cursor.y + CGFloat(dy), 0), guestSize.height - 1)
+            winios_pointer(Int32(cursor.x), Int32(cursor.y), 0x8001, 0)
+        }
+    }
     override var canBecomeFirstResponder: Bool { true }
     static func toggleKeyboard() {
         guard let v = keyboardTarget else { return }
@@ -86,6 +133,8 @@ final class MetalBackedView: UIView {
             name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(resumeDisplay),
             name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardDisconnected),
+            name: .GCKeyboardDidDisconnect, object: nil)
     }
     required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
     deinit {
@@ -102,6 +151,7 @@ final class MetalBackedView: UIView {
 
     @objc private func resignInput() {
         cancelTouchSession()
+        hardwareKeyboard.releaseAll()
         if Self.keyboardTarget === self {
             GuestInput.shared.releaseAll()
             UIApplication.shared.isIdleTimerDisabled = false
@@ -115,6 +165,7 @@ final class MetalBackedView: UIView {
         if layoutTimer == nil {
             let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
                 guard let self else { return }
+                PhysicalControllerBridge.shared.refreshCapture()
                 let size = MetalHostView.shared.metalLayer.drawableSize
                 if size != self.lastDrawableSize {
                     self.lastDrawableSize = size
@@ -167,6 +218,7 @@ final class MetalBackedView: UIView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         guard let w = window else {
+            PhysicalControllerBridge.shared.detach(self)
             resignInput()
             if Self.keyboardTarget === self {
                 Self.keyboardTarget = nil
@@ -175,6 +227,7 @@ final class MetalBackedView: UIView {
             return
         }
         MetalBackedView.keyboardTarget = self  // keyboard button targets the live view
+        PhysicalControllerBridge.shared.attach(self)
         // SwiftUI ancestors attach gesture recognizers that can delay or
         // cancel raw touch delivery (double-tap timing is exactly what
         // they punish). Defuse them for our subtree.
@@ -886,6 +939,9 @@ final class InputSettings: ObservableObject {
     @Published var relative: Bool  = false { didSet { save() } }
     @Published var sensAbs:  Double = 2.0  { didSet { save() } }
     @Published var sensRel:  Double = 2.0  { didSet { save() } }
+    @Published var controllerEnabled = false { didSet { updateController(); save() } }
+    @Published var controllerSpeed = 800.0 { didSet { updateController(); save() } }
+    @Published var controllerDeadZone = 0.12 { didSet { updateController(); save() } }
     /// ml649: heavy diagnostics. Default OFF so the shipped default is the fast
     /// path; flip it on only when a run needs to be explainable.
     @Published var diagnostics = false { didSet { madeira_set_diag_enabled(diagnostics ? 1 : 0); save() } }
@@ -908,14 +964,27 @@ final class InputSettings: ObservableObject {
             sensAbs  = DisplayGeometry.sensitivity(j["sensAbs"] as? Double ?? 2.0)
             sensRel  = DisplayGeometry.sensitivity(j["sensRel"] as? Double ?? 2.0)
             diagnostics = j["diagnostics"] as? Bool ?? false
+            controllerEnabled = j["controllerEnabled"] as? Bool ?? false
+            controllerSpeed = ControllerMath.speed(j["controllerSpeed"] as? Double ?? 800)
+            controllerDeadZone = ControllerMath.deadZone(j["controllerDeadZone"] as? Double ?? 0.12)
         }
         loading = false
         madeira_set_diag_enabled(diagnostics ? 1 : 0)   // push the restored value down
+        updateController()
+    }
+
+    private func updateController() {
+        guard !loading else { return }
+        PhysicalControllerBridge.shared.configure(enabled: controllerEnabled,
+            speed: controllerSpeed, deadZone: controllerDeadZone)
     }
 
     private func save() {
         guard !loading else { return }
-        let j: [String: Any] = ["relative": relative, "sensAbs": sensAbs, "sensRel": sensRel, "diagnostics": diagnostics]
+        let j: [String: Any] = ["relative": relative, "sensAbs": sensAbs, "sensRel": sensRel,
+            "diagnostics": diagnostics, "controllerEnabled": controllerEnabled,
+            "controllerSpeed": ControllerMath.speed(controllerSpeed),
+            "controllerDeadZone": ControllerMath.deadZone(controllerDeadZone)]
         guard let d = try? JSONSerialization.data(withJSONObject: j) else { return }
         try? d.write(to: Self.url, options: .atomic)
     }
@@ -934,6 +1003,7 @@ struct ContentView: View {
     @State private var entitlements: EntitlementStatus?
     @State private var debuggerAttached = isDebuggerAttached()
     @ObservedObject private var input = InputSettings.shared
+    @ObservedObject private var controllers = PhysicalControllerBridge.shared
     @State private var pointerPanel = false
     @Namespace private var pointerNS
     /// .compact = iPhone landscape: game surface expands, arrow keys appear.
@@ -970,12 +1040,41 @@ struct ContentView: View {
             .navigationTitle("Madeira")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarHidden(vSizeClass == .compact)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { controllerMenu }
+            }
             .onAppear {
                 jit_install_trap_handler()
                 entitlements = EntitlementStatus.check()
                 logEntitlementStatus()
             }
         }
+    }
+
+    private var controllerMenu: some View {
+        Menu {
+            Toggle("Controller → keys + mouse", isOn: $input.controllerEnabled)
+            Text("\(controllers.connectedCount) supported controller(s) connected")
+            Picker("Look speed (pixels/second)", selection: $input.controllerSpeed) {
+                ForEach([200.0, 500, 800, 1200, 1600], id: \.self) { speed in
+                    Text("\(Int(speed))").tag(speed)
+                }
+            }
+            Picker("Stick dead zone", selection: $input.controllerDeadZone) {
+                Text("8%").tag(0.08)
+                Text("12%").tag(0.12)
+                Text("18%").tag(0.18)
+                Text("24%").tag(0.24)
+            }
+            Text("Left stick: WASD · Right stick: mouse")
+            Text("A: Space · B: Ctrl · X: E · Y: R")
+            Text("LT/RT: right/left click · D-pad: arrows")
+            Text("LB/RB: Q/F · L3/R3: Shift/C")
+            Text("Menu: Esc · Options: Tab · Not XInput")
+        } label: {
+            Image(systemName: input.controllerEnabled ? "gamecontroller.fill" : "gamecontroller")
+        }
+        .accessibilityLabel("Physical controller settings")
     }
 
     /// Portrait: classic tooling layout — header, badges, 240pt game strip,
@@ -1146,9 +1245,10 @@ struct ContentView: View {
 
     private func keyButton(_ label: String, vk: Int32) -> some View {
         Button(action: {
-            winios_post_key(vk, 1)
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.06) {
-                winios_post_key(vk, 0)
+            let source = UUID()
+            GuestInput.shared.state.set(.key(vk), down: true, source: source)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                GuestInput.shared.state.release(source: source)
             }
         }) {
             Text(label)

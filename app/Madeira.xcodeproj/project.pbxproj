@@ -58,6 +58,10 @@
 		A1000206 /* LogLineFramer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000206 /* LogLineFramer.swift */; };
 		A1000207 /* AppendLogFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000207 /* AppendLogFile.swift */; };
 		A1000208 /* FrameRateSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000208 /* FrameRateSampler.swift */; };
+		A1000209 /* ControllerMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000209 /* ControllerMath.swift */; };
+		A100020A /* HardwareKeyboardState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200020A /* HardwareKeyboardState.swift */; };
+		A100020B /* PhysicalControllerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200020B /* PhysicalControllerBridge.swift */; };
+		A100020C /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A200020C /* GameController.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -123,6 +127,10 @@
 		A2000206 /* LogLineFramer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LogLineFramer.swift"; sourceTree = "<group>"; };
 		A2000207 /* AppendLogFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppendLogFile.swift"; sourceTree = "<group>"; };
 		A2000208 /* FrameRateSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FrameRateSampler.swift"; sourceTree = "<group>"; };
+		A2000209 /* ControllerMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ControllerMath.swift"; sourceTree = "<group>"; };
+		A200020A /* HardwareKeyboardState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HardwareKeyboardState.swift"; sourceTree = "<group>"; };
+		A200020B /* PhysicalControllerBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PhysicalControllerBridge.swift"; sourceTree = "<group>"; };
+		A200020C /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -144,6 +152,7 @@
 				A1000042 /* libz.tbd in Frameworks */,
 				A1000051 /* libdxmt_combined.a in Frameworks */,
 				A1000052 /* Metal.framework in Frameworks */,
+				A100020C /* GameController.framework in Frameworks */,
 				A1000053 /* QuartzCore.framework in Frameworks */,
 				A1000054 /* MetalFX.framework in Frameworks */,
 				A1000055 /* libsqlite3.tbd in Frameworks */,
@@ -176,6 +185,9 @@
 				A2000200 /* LogPattern.swift */,
 				A2000201 /* LogTail.swift */,
 				A2000202 /* FPSOverlay.swift */,
+				A200020B /* PhysicalControllerBridge.swift */,
+				A200020A /* HardwareKeyboardState.swift */,
+				A2000209 /* ControllerMath.swift */,
 				A2000208 /* FrameRateSampler.swift */,
 				A2000207 /* AppendLogFile.swift */,
 				A2000206 /* LogLineFramer.swift */,
@@ -238,6 +250,7 @@
 				A2000042 /* libz.tbd */,
 				A2000051 /* libdxmt_combined.a */,
 				A2000052 /* Metal.framework */,
+				A200020C /* GameController.framework */,
 				A2000053 /* QuartzCore.framework */,
 				A2000054 /* MetalFX.framework */,
 				A2000055 /* libsqlite3.tbd */,
@@ -331,6 +344,9 @@
 				A1000200 /* LogPattern.swift in Sources */,
 				A1000201 /* LogTail.swift in Sources */,
 				A1000202 /* FPSOverlay.swift in Sources */,
+				A100020B /* PhysicalControllerBridge.swift in Sources */,
+				A100020A /* HardwareKeyboardState.swift in Sources */,
+				A1000209 /* ControllerMath.swift in Sources */,
 				A1000208 /* FrameRateSampler.swift in Sources */,
 				A1000207 /* AppendLogFile.swift in Sources */,
 				A1000206 /* LogLineFramer.swift in Sources */,
