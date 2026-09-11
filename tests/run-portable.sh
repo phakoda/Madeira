@@ -21,4 +21,10 @@ swiftc -warnings-as-errors -o "$OUT/geometry-input-test" \
     "$ROOT/tests/swift/GeometryInputTests.swift"
 "$OUT/geometry-input-test"
 swiftc -frontend -parse "$ROOT/app/Madeira/ContentView.swift"
+swiftc -warnings-as-errors -o "$OUT/log-test" \
+    "$ROOT/app/Madeira/LogRecord.swift" "$ROOT/app/Madeira/LogLineFramer.swift" \
+    "$ROOT/app/Madeira/AppendLogFile.swift" "$ROOT/app/Madeira/LogTail.swift" \
+    "$ROOT/app/Madeira/LogPattern.swift" "$ROOT/tests/swift/LogTests.swift"
+"$OUT/log-test"
+swiftc -frontend -parse "$ROOT/app/Madeira/LogStore.swift"
 echo 'Portable suites passed.'

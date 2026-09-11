@@ -61,13 +61,13 @@ static void wine_log_write(const char *fmt, ...)
     char buf[1024];
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
-    /* Direct stderr (which is dup2'd to log file) instead of os_log to avoid
-     * potential ObjC dispatch from inside FEX/x18-zero contexts. */
-    dprintf(STDERR_FILENO, "%s\n", buf);
-    /* Forward to UI log callback */
+    /* Forward to an optional observer, without holding the file mutex. The
+     * app tails the log file and leaves this callback unset. */
     extern void wine_ui_log(const char *message);
     wine_ui_log(buf);
-    /* Also write to file if set */
+    /* Exactly one persistent sink: stderr is normally dup2'd to this same
+     * file. Writing to both duplicates every Wine event. Avoid os_log here
+     * because this runs in FEX/x18-zero contexts. */
     pthread_mutex_lock(&g_wine_log_mutex);
     if (g_wine_log_file) {
         struct timeval tv;
@@ -77,6 +77,8 @@ static void wine_log_write(const char *fmt, ...)
         fprintf(g_wine_log_file, "[%02d:%02d:%02d.%03d] %s\n",
                 tm.tm_hour, tm.tm_min, tm.tm_sec, (int)(tv.tv_usec/1000), buf);
         fflush(g_wine_log_file);
+    } else {
+        dprintf(STDERR_FILENO, "%s\n", buf);
     }
     pthread_mutex_unlock(&g_wine_log_mutex);
 }

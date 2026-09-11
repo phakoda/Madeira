@@ -8,21 +8,9 @@ final class LogStore: ObservableObject {
     @Published var entries: [LogEntry] = []
 
     private let logFileURL: URL
-    private let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss.SSS"
-        return f
-    }()
-
-    // Tail-file reader (background)
+    private let fileWriter: AppendLogFile
+    private let pending = LogAccumulator()
     private var tail: LogTail?
-    // Signature → index into `entries` so we can update in O(1)
-    private var sigToIndex: [String: Int] = [:]
-    // Lock for sigToIndex + pending mutations
-    private let stateLock = NSLock()
-    // Pending batched diffs to apply on main thread
-    private var pendingNew: [LogEntry] = []
-    private var pendingUpdates: [(index: Int, count: Int, lastRaw: String, lastTimestamp: Date)] = []
     private var flushTimer: Timer?
 
     /// When true, UI flushes slowly (1.5s) instead of normally (200ms). Used
@@ -40,26 +28,12 @@ final class LogStore: ObservableObject {
     // Cap on distinct entries kept in memory
     private let maxEntries = 200
 
-    struct LogEntry: Identifiable {
-        let id = UUID()
-        var firstTimestamp: Date
-        var lastTimestamp: Date
-        var signature: String
-        var lastRaw: String
-        var count: Int
-        var level: Level
-
-        enum Level: String {
-            case info = "INFO"
-            case success = "OK"
-            case error = "ERR"
-            case debug = "DBG"
-        }
-    }
+    typealias LogEntry = LogRecord
 
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         logFileURL = docs.appendingPathComponent("madeira-log.txt")
+        fileWriter = AppendLogFile(path: logFileURL.path)
 
         // ml601: ROTATE, don't destroy.
         //
@@ -91,62 +65,28 @@ final class LogStore: ObservableObject {
         }
         tail?.start()
 
-        // Also accept programmatic logs from Swift/ObjC code via existing
-        // C callbacks (kept for compatibility with code that doesn't write
-        // to the log file).
-        wine_set_ui_log_callback { cStr in
-            guard let cStr = cStr else { return }
-            let message = String(cString: cStr)
-            LogStore.shared.handleRawLine(message)
-        }
+        // Wine's native loggers already write this file. Ingesting their UI
+        // callback AND tailing the same bytes double-counts events and allocates
+        // Swift objects on exception paths. Use the file as the single feed.
+        wine_set_ui_log_callback(nil)
         jit_set_log_callback { cStr in
-            guard let cStr = cStr else { return }
-            let message = String(cString: cStr)
-            LogStore.shared.handleRawLine(message)
-            // ml359: also persist — jit_log lines (incl. the [no-footprint]
-            // verdict) previously reached only the UI view, which dies with
-            // the app; pulled logs never contained them.
-            LogStore.shared.appendToFile(message, level: .info)
+            guard let cStr else { return }
+            LogStore.shared.log("[JIT] " + String(cString: cStr))
         }
     }
 
-    /// Public entry point for Swift-side logging (kept for ContentView calls)
+    /// Thread-safe producer entry point. The tail is the sole UI ingestion path
+    /// after successful persistence; failed writes still produce a visible row.
     func log(_ message: String, level: LogEntry.Level = .info) {
-        handleRawLine(message)
-        // Also append to the file so it shows up in pulled logs alongside Wine output
-        appendToFile(message, level: level)
+        if !fileWriter.append(message, level: level) {
+            handleRawLine("[\(level.rawValue)] " + message)
+        }
     }
 
-    /// Called from tail-file callback (background queue) or C callback.
     private func handleRawLine(_ raw: String) {
-        // Filter out lines we never want in UI (excessive byte spam, etc.)
-        if shouldDropLine(raw) { return }
-
-        let (sig, level) = LogPattern.canonicalize(raw)
-        if sig.isEmpty { return }
-
-        let now = Date()
-        stateLock.lock()
-        if let idx = sigToIndex[sig] {
-            pendingUpdates.append((idx, 1, raw, now))
-        } else {
-            // Reserve an index slot — actual append happens on flush.
-            // We can't know the true index here without holding entries,
-            // so we'll resolve indices during flush.
-            let entry = LogEntry(
-                firstTimestamp: now,
-                lastTimestamp: now,
-                signature: sig,
-                lastRaw: raw,
-                count: 1,
-                level: level
-            )
-            pendingNew.append(entry)
-            // Map sig → -1 sentinel so subsequent same-sig lines from this
-            // batch get treated as new too (will be merged during flush).
-            sigToIndex[sig] = -1
-        }
-        stateLock.unlock()
+        guard !shouldDropLine(raw) else { return }
+        let (signature, level) = LogPattern.canonicalize(raw)
+        pending.append(signature: signature, raw: raw, level: level)
     }
 
     /// Filter rules for raw lines. Anything that returns true is dropped
@@ -181,102 +121,27 @@ final class LogStore: ObservableObject {
         }
     }
 
-    /// Apply pending changes to @Published entries (main thread).
-    /// Runs on main thread, interval determined by uiPaused.
+    /// Publish once per batch, outside the producer lock.
     private func flushPending() {
-
-        stateLock.lock()
-        let newBatch = pendingNew
-        let updateBatch = pendingUpdates
-        pendingNew.removeAll(keepingCapacity: true)
-        pendingUpdates.removeAll(keepingCapacity: true)
-        stateLock.unlock()
-
-        if newBatch.isEmpty && updateBatch.isEmpty { return }
-
-        // Apply updates (existing entries: bump count, update timestamp)
-        for u in updateBatch {
-            // Some indices may have been the -1 sentinel — match by signature
-            if u.index < 0 || u.index >= entries.count { continue }
-            entries[u.index].count += u.count
-            entries[u.index].lastTimestamp = u.lastTimestamp
-            entries[u.index].lastRaw = u.lastRaw
+        var batch = pending.drain()
+        if batch.evictedLines > 0 {
+            let now = Date()
+            batch.records.append(LogEntry(firstTimestamp: now, lastTimestamp: now,
+                signature: "[log] UI backlog summarized; complete output remains in the log file",
+                lastRaw: "\(batch.evictedLines) lines evicted from the bounded UI pending buffer",
+                count: batch.evictedLines, level: .info))
         }
-
-        // Apply news: dedup against in-batch sigs (so if 5 same-sig lines
-        // arrived in one batch, we get one entry with count=5)
-        var batchSigToBatchIdx: [String: Int] = [:]
-        var collapsedNew: [LogEntry] = []
-        for var entry in newBatch {
-            if let i = batchSigToBatchIdx[entry.signature] {
-                collapsedNew[i].count += 1
-                collapsedNew[i].lastTimestamp = entry.lastTimestamp
-                collapsedNew[i].lastRaw = entry.lastRaw
-            } else {
-                // Or against the live entries list (race with this same flush)
-                if let existing = entries.firstIndex(where: { $0.signature == entry.signature }) {
-                    entries[existing].count += 1
-                    entries[existing].lastTimestamp = entry.lastTimestamp
-                    entries[existing].lastRaw = entry.lastRaw
-                    continue
-                }
-                batchSigToBatchIdx[entry.signature] = collapsedNew.count
-                collapsedNew.append(entry)
-            }
-        }
-
-        // Append new entries. sigToIndex is read/written by handleRawLine on
-        // Wine threads, so every mutation of it here MUST hold stateLock —
-        // the unlocked writes corrupted the dictionary and threw an
-        // NSException on the wineserver thread (2026-07-03).
-        stateLock.lock()
-        for entry in collapsedNew {
-            entries.append(entry)
-            let newIndex = entries.count - 1
-            sigToIndex[entry.signature] = newIndex
-        }
-
-        // Reindex if we evicted
-        if entries.count > maxEntries {
-            // Drop oldest by lastTimestamp
-            entries.sort { $0.lastTimestamp < $1.lastTimestamp }
-            let drop = entries.count - maxEntries
-            let removed = entries.prefix(drop).map { $0.signature }
-            entries.removeFirst(drop)
-            for sig in removed { sigToIndex.removeValue(forKey: sig) }
-            // Reindex remaining
-            sigToIndex.removeAll()
-            for (i, e) in entries.enumerated() { sigToIndex[e.signature] = i }
-            // Sort back to insertion order (by firstTimestamp)
-            entries.sort { $0.firstTimestamp < $1.firstTimestamp }
-            sigToIndex.removeAll()
-            for (i, e) in entries.enumerated() { sigToIndex[e.signature] = i }
-        }
-        stateLock.unlock()
+        guard !batch.records.isEmpty else { return }
+        entries = LogAccumulator.merge(batch.records, into: entries, capacity: maxEntries)
     }
 
-    /// Manual clear (used by UI button)
+    /// Clear the console, not the underlying inode. Atomic file replacement
+    /// strands stderr/Wine's open descriptors and makes subsequent logs vanish.
     func clear() {
-        stateLock.lock()
-        sigToIndex.removeAll()
-        pendingNew.removeAll()
-        pendingUpdates.removeAll()
-        stateLock.unlock()
-        entries.removeAll()
-        try? "".write(to: logFileURL, atomically: true, encoding: .utf8)
-    }
-
-    /// Write to file (called from `log()` for Swift-side messages so they
-    /// land in the file alongside Wine/FEX output, picked up by the tail
-    /// reader).
-    private func appendToFile(_ message: String, level: LogEntry.Level = .info) {
-        let line = "[\(dateFormatter.string(from: Date()))] [\(level.rawValue)] \(message)\n"
-        if let data = line.data(using: .utf8) {
-            if let handle = try? FileHandle(forWritingTo: logFileURL) {
-                handle.seekToEndOfFile()
-                handle.write(data)
-                handle.closeFile()
-            }
+        tail?.skipToEnd { [weak self] in
+            guard let self else { return }
+            self.pending.clear()
+            DispatchQueue.main.async { [weak self] in self?.entries.removeAll() }
         }
     }
 }

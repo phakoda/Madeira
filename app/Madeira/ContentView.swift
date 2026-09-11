@@ -1777,9 +1777,7 @@ struct ContentView: View {
         fex_set_log_callback { msg in
             if let msg = msg {
                 let str = String(cString: msg)
-                DispatchQueue.main.async {
-                    LogStore.shared.log(str, level: .debug)
-                }
+                LogStore.shared.log("[FEX] " + str, level: .debug)
             }
         }
 

@@ -75,12 +75,11 @@ static void jit_log(const char *fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
-    if (g_log_callback) {
-        g_log_callback(buf);
-    }
-    // Log to os_log (visible in Console.app) and stderr (Xcode)
+    if (g_log_callback) g_log_callback(buf);
+    else fprintf(stderr, "[JIT] %s\n", buf);
+    // The callback persists the line. Writing to redirected stderr as well
+    // would duplicate it in both the file and the tail's event counts.
     os_log(OS_LOG_DEFAULT, "[JIT] %{public}s", buf);
-    fprintf(stderr, "[JIT] %s\n", buf);
 }
 
 static size_t align_to_page(size_t size) {

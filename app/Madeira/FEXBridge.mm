@@ -65,11 +65,9 @@ static void fex_log(const char *fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
-    if (g_fex_log_callback) {
-        g_fex_log_callback(buf);
-    }
+    if (g_fex_log_callback) g_fex_log_callback(buf);
+    else fprintf(stderr, "[FEX] %s\n", buf);
     os_log(OS_LOG_DEFAULT, "[FEX] %{public}s", buf);
-    fprintf(stderr, "[FEX] %s\n", buf);
 }
 
 // ---------------------------------------------------------------------------

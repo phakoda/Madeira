@@ -112,3 +112,26 @@ under ASan/UBSan, including 10,000 successive frames for one HWND, pending-windo
 reuse, stale tasks, budget exhaustion/recovery, and malformed layouts. Actual
 Core Animation/Metal output, color fidelity, and GPU timing require the device
 checks below; they cannot be certified by these host-side tests.
+
+## Logging correctness and bounded work
+
+Replaced index-based pending UI updates with locked, bounded signature buckets
+and stable record IDs. Each flush merges and publishes once; repeated messages
+in the same batch are counted exactly. Regexes are compiled once. The tail is
+the sole UI feed for persisted records, preventing callback/tail double-counts.
+Swift log writes use one locked O_APPEND descriptor rather than opening a handle
+per event. FEX/JIT callbacks persist through that sink, with stderr as fallback;
+ntdll's source logger likewise chooses file or stderr, not both. The ntdll change
+requires rebuilding its native library; the bundled binary remains unchanged.
+
+The serial tail has one timer and one descriptor owner. It handles observed
+truncation and inode replacement, idempotent start/stop, retry cancellation,
+split UTF-8/CRLF, and oversized lines with bounded memory. Each read turn has a
+256 KiB work budget. The console Clear button now clears the console only: it
+never replaces the log inode underneath native writers. Complete logs remain
+on disk. This pass bounds the UI queue, not the total on-disk log size.
+
+Compiled production Swift helpers passed **1,061 logging checks**, including
+64,000 concurrent bucketed events and 1,000 concurrent file appends, stable IDs,
+rotation/truncation, descriptor reuse, failed writes, and stop-before-open.
+UIKit/SwiftUI integration remains syntax-only validated on this host.
