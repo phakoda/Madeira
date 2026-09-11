@@ -8,7 +8,9 @@ history. New branch: `improvements/runtime-quality`.
 Qualified the shared `MetalBackedView.cursor` with `Self` inside the controller
 pointer method. Swift syntax parsing alone did not detect this static/instance
 member error. The actual method was extracted and typechecked against minimal
-boundary stubs; this is not an Apple SDK typecheck of the full UI.
+boundary stubs and exercised for absolute/relative movement, edge clamps,
+resize and shared position. It is now part of the repeatable mouse suite, not
+a one-off check. This is not an Apple SDK typecheck of the full UI.
 
 ## Audio client contracts
 
@@ -99,7 +101,7 @@ No polling/display-link timer was added to mouse input; it uses device callbacks
 and the display's existing lifecycle check.
 
 The real production bridge is typechecked and executed against small test-only
-UIKit/GameController/Combine boundary modules. Its suite passes 200,044 checks,
+UIKit/GameController/Combine boundary modules. Its suite passes 200,054 checks,
 including 100,000 conservation-of-motion steps, focus/rotation/disconnect,
 multiple-mouse ownership, stale callback rejection, side-button payloads and
 fractional wheel input. These tests do not certify Apple's real API availability,
@@ -155,3 +157,16 @@ Wineserver remains a patch-on-existing-library build, not a clean full-source
 reconstruction. Concurrent successful builds can publish in either completion
 order (last completed publication wins), but cannot publish a partially copied
 library.
+
+
+## Independent native validation gates
+
+`tests/typecheck-ios.sh` checks all 19 production Swift files against a genuine
+Apple SDK without linking engines. The new `tests/typecheck-audio-ios.sh` checks
+the actual audio driver against Apple's AudioToolbox/Mach declarations without
+requiring Wine generated headers. Neither was executable on this Linux host;
+both correctly report the missing Apple SDK and exit 2. They are supplied for
+native validation, not recorded as successful Apple builds. The driver now also
+has compile-time requirements for 32-bit float storage and always-lock-free
+integer atomics so an unsupported target cannot silently use locks in the render
+callback.

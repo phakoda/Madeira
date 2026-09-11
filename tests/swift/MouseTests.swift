@@ -10,10 +10,12 @@ final class MouseTarget: MousePointerTarget {
     var deltas: [(Int32, Int32)] = []
     func moveControllerPointer(dx: Int32, dy: Int32) { deltas.append((dx, dy)) }
 }
-struct NativeMouseEvent { let flags: UInt32, data: UInt32 }
+// Only the shared setting read by the extracted production view method.
+final class InputSettings { static let shared = InputSettings(); var relative = false }
+struct NativeMouseEvent { let x: Int32, y: Int32, flags: UInt32, data: UInt32 }
 var nativeEvents: [NativeMouseEvent] = []
 func winios_pointer(_ x: Int32, _ y: Int32, _ flags: UInt32, _ data: UInt32) {
-    nativeEvents.append(NativeMouseEvent(flags: flags, data: data))
+    nativeEvents.append(NativeMouseEvent(x: x, y: y, flags: flags, data: data))
 }
 func winios_post_key(_ vk: Int32, _ down: Int32) {}
 func winios_release_all_inputs() {}
@@ -50,6 +52,28 @@ func winios_release_all_inputs() {}
             check(abs(exact - Double(emitted) - axis.remainder) < 1e-8, "motion conserved")
             check(abs(axis.remainder) < 1, "fractional remainder bounded")
         }
+        let routing = PointerRoutingUnderTest()
+        routing.moveControllerPointer(dx: 30, dy: 40)
+        check(nativeEvents.last!.x == 30 && nativeEvents.last!.y == 40, "absolute cursor motion")
+        check(nativeEvents.last!.flags == 0x8001 && nativeEvents.last!.data == 0, "absolute payload")
+        routing.moveControllerPointer(dx: Int32.max, dy: Int32.min)
+        check(nativeEvents.last!.x == 1023 && nativeEvents.last!.y == 0, "absolute extent clamps")
+        routing.moveControllerPointer(dx: Int32.min, dy: Int32.max)
+        check(nativeEvents.last!.x == 0 && nativeEvents.last!.y == 767, "opposite extent clamps")
+        InputSettings.shared.relative = true
+        routing.moveControllerPointer(dx: -2, dy: 9)
+        check(nativeEvents.last!.x == -2 && nativeEvents.last!.y == 9, "relative deltas unchanged")
+        check(nativeEvents.last!.flags == 1, "relative payload")
+        check(PointerRoutingUnderTest.cursor == CGPoint(x: 0, y: 767), "relative mode does not corrupt absolute state")
+        InputSettings.shared.relative = false
+        let rotated = PointerRoutingUnderTest(); rotated.guestSize = CGSize(width: 640, height: 480)
+        rotated.moveControllerPointer(dx: 10, dy: 0)
+        check(nativeEvents.last!.x == 10 && nativeEvents.last!.y == 479, "shared cursor bounded after resize")
+        rotated.guestSize = CGSize(width: 1, height: 1)
+        rotated.moveControllerPointer(dx: 100, dy: 100)
+        check(nativeEvents.last!.x == 0 && nativeEvents.last!.y == 0, "smallest valid desktop")
+        check(nativeEvents.count == 6, "exactly one event per view move")
+        nativeEvents.removeAll()
         let a = GCMouse(), b = GCMouse()
         GCMouse.devices = [a, b]
         let bridge = PhysicalMouseBridge.shared, target = MouseTarget()

@@ -1,16 +1,14 @@
 /*
- * audio_null_ios.c — minimal Wine audio "null" driver for iOS Madeira.
+ * audio_null_ios.c — Wine render-audio driver for iOS Madeira.
  *
  * Wine's mmdevapi loads a `wine<name>.drv` PE plus a unix-side function
  * table (37 entries). On Linux/macOS the unix table is a separate .so.
  * On iOS we statically link the table into Madeira.app — this file is
  * that table for "ios" / "coreaudio".
  *
- * Behaviour: ONE fake render endpoint, accepts buffer submissions and
- * discards, advances IAudioClock at real-time based on
- * mach_absolute_time. Enough to let FMOD's clock-driven timing
- * advance (rhythm games like Thumper gate splash→title on intro
- * music completing — this is what makes that work).
+ * One render endpoint supports independent per-client RemoteIO streams.
+ * If hardware setup fails, a clock-only fallback discards submissions while
+ * preserving the timing contract. This is not a capture/loopback/MIDI driver.
  *
  * 2026-07-05 TIER-2: REAL AUDIO OUTPUT via a RemoteIO AudioUnit.
  * WASAPI render semantics map onto a lock-free ring buffer:
@@ -38,6 +36,13 @@
 #include <stdatomic.h>
 #include <math.h>
 #include <limits.h>
+
+/* A real-time callback must never call libatomic's fallback locks. Madeira
+ * targets ARM64; fail compilation rather than silently weakening this contract
+ * on an unsupported host/target. uint64_t may be long or long long by ABI. */
+_Static_assert(ATOMIC_INT_LOCK_FREE == 2 && ATOMIC_LONG_LOCK_FREE == 2 &&
+               ATOMIC_LLONG_LOCK_FREE == 2, "Audio callback requires lock-free integers");
+_Static_assert(sizeof(float) == sizeof(uint32_t), "Audio gains require 32-bit float");
 
 /* Struct/enum mirrors from wine/dlls/mmdevapi/unixlib.h. Repeating the
  * essential layout here avoids include-path drama with Wine's COM
