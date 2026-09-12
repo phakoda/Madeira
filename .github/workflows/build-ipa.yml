@@ -1,0 +1,163 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      native_deps_url:
+        description: "Optional ZIP URL containing missing native outputs at repository-relative paths"
+        required: false
+        type: string
+      native_deps_sha256:
+        description: "Optional SHA-256 for native_deps_url"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    name: Build Madeira IPA
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Show toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          SDK_VERSION="$(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "iPhoneOS SDK: ${SDK_VERSION}"
+          SDK_MAJOR="${SDK_VERSION%%.*}"
+          if (( SDK_MAJOR < 26 )); then
+            echo "::error::Madeira currently requires the iOS 26 SDK or newer."
+            exit 1
+          fi
+          git submodule status --recursive
+
+      - name: Restore native build outputs
+        if: ${{ inputs.native_deps_url != '' }}
+        env:
+          NATIVE_DEPS_URL: ${{ inputs.native_deps_url }}
+          NATIVE_DEPS_SHA256: ${{ inputs.native_deps_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/madeira-native-deps.zip"
+          curl --fail --location --retry 3 --output "$ARCHIVE" "$NATIVE_DEPS_URL"
+
+          if [[ -n "$NATIVE_DEPS_SHA256" ]]; then
+            printf '%s  %s\n' "$NATIVE_DEPS_SHA256" "$ARCHIVE" | shasum -a 256 -c -
+          fi
+
+          # The archive must contain repository-relative paths, for example:
+          # app/Madeira/libntdll_unix.a and FEX/build-ios/...
+          ditto -x -k "$ARCHIVE" "$GITHUB_WORKSPACE"
+
+      - name: Verify native prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            "app/Madeira/libntdll_unix.a"
+            "app/Madeira/libwineserver.a"
+            "app/Madeira/libwin32u_unix.a"
+            "app/Madeira/libdxmt_combined.a"
+            "FEX/build-ios/FEXCore/Source/libFEXCore.a"
+            "FEX/build-ios/FEXCore/Source/libFEXCore_Base.a"
+            "FEX/build-ios/FEXCore/Source/libJemallocLibs.a"
+            "FEX/build-ios/External/fmt/libfmt.a"
+            "FEX/build-ios/External/cephes/libcephes_128bit.a"
+            "FEX/build-ios/External/xxhash/cmake_unofficial/libxxhash.a"
+            "FEX/build-ios/External/SoftFloat-3e/libsoftfloat_3e.a"
+            "app/Madeira/x86_64-vcruntime"
+          )
+
+          missing=0
+          for path in "${required[@]}"; do
+            if [[ ! -e "$path" ]]; then
+              echo "::error file=$path::Missing required native build input: $path"
+              missing=1
+            fi
+          done
+
+          if [[ ! -d "FEX/build-ios/include" ]]; then
+            echo "::error file=FEX/build-ios/include::Missing generated FEX build headers. Include the complete FEX/build-ios tree in the dependency ZIP."
+            missing=1
+          fi
+
+          if (( missing != 0 )); then
+            echo
+            echo "The repository snapshot intentionally does not contain all native build outputs."
+            echo "Run this workflow again with native_deps_url pointing to a ZIP that overlays the missing repository-relative paths."
+            exit 1
+          fi
+
+      - name: Build unsigned iOS app
+        shell: bash
+        run: |
+          set -euo pipefail
+          DERIVED_DATA="$RUNNER_TEMP/DerivedData"
+
+          xcodebuild \
+            -project app/Madeira.xcodeproj \
+            -scheme Madeira \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            DEVELOPMENT_TEAM='' \
+            build | tee "$RUNNER_TEMP/xcodebuild.log"
+
+          APP_PATH="$DERIVED_DATA/Build/Products/Release-iphoneos/Madeira.app"
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo "::error::Expected app bundle was not produced at $APP_PATH"
+            exit 1
+          fi
+
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+
+      - name: Package IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_DIR="$RUNNER_TEMP/ipa"
+          rm -rf "$PACKAGE_DIR"
+          mkdir -p "$PACKAGE_DIR/Payload"
+          ditto "$APP_PATH" "$PACKAGE_DIR/Payload/Madeira.app"
+
+          (
+            cd "$PACKAGE_DIR"
+            /usr/bin/zip -qry "$GITHUB_WORKSPACE/Madeira-unsigned.ipa" Payload
+          )
+
+          test -s "$GITHUB_WORKSPACE/Madeira-unsigned.ipa"
+          echo "Built $(du -h "$GITHUB_WORKSPACE/Madeira-unsigned.ipa" | awk '{print $1}') IPA"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v7
+        with:
+          name: Madeira-unsigned-${{ github.sha }}
+          path: Madeira-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Xcode log on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: Madeira-xcodebuild-log-${{ github.sha }}
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
