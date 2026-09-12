@@ -82,4 +82,6 @@ The pinned FEX source confirms direct instruction reads in `FEXCore/Source/Inter
 
 Coverage includes overlapping reservations, automatic placement, range exhaustion, the final guest byte, cross-page copies, execute-only access, failed-operation atomicity, mixed permissions within a 16 KiB region, decommit/recommit, independent spaces, allocation-failure rollback, native spans, and concurrent unaligned compare/exchange. Tests inject allocation failures into the production commit path, rather than substituting a model implementation.
 
+The [GitHub Actions run for implementation commit `e214c14`](https://github.com/phakoda/Madeira/actions/runs/34716039114) passed on both Linux and macOS, including the sanitizer tests and separate C ABI caller. Local project-membership, plist, shell syntax, and whitespace checks also passed.
+
 No local compilation was performed. Host tests do not prove iOS integration or native x86 execution. Enabling native32 still requires device runs of a small x86 program, an installer, and the requested game through the completed Wine/FEX route.
