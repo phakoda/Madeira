@@ -6,6 +6,7 @@ on:
     paths:
       - 'build/mesa-ios/**'
       - 'build/boxedwine/**'
+      - 'tests/wine32/**'
       - '.github/workflows/mesa-ios.yml'
 
 permissions:
@@ -21,7 +22,26 @@ env:
   GIT_CONFIG_VALUE_0: 'OpenAI File Downloader, XaiImageApiFetch/1.0'
 
 jobs:
+  windows-fixtures:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native x86 Windows fixtures and MSI
+        run: |
+          sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' update
+          sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' install -y gcc-mingw-w64-i686 wixl
+          mkdir -p /tmp/payload
+          i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/runtime_probe.c -ladvapi32 -o /tmp/payload/probe.exe
+          i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/graphics_probe.c -ld3d9 -luser32 -o /tmp/payload/graphics.exe
+          cp tests/wine32/probe.wxs tests/wine32/install.cmd /tmp/payload/
+          (cd /tmp/payload && wixl -a x86 -o probe.msi probe.wxs)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x86-windows-fixtures
+          path: /tmp/payload/
   osmesa:
+    needs: windows-fixtures
     runs-on: macos-15
     timeout-minutes: 45
     strategy:
@@ -33,6 +53,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86-windows-fixtures
+          path: /tmp/payload
       - name: Build and link static software OpenGL for iOS
         run: |
           set -o pipefail
@@ -41,15 +65,21 @@ jobs:
         run: |
           set -o pipefail
           export PATH="$PWD/build/mesa-ios/.work/${{ matrix.sdk }}/python/bin:$PATH"
-          python3 build/boxedwine/fetch.py --cache /tmp/boxedwine-cache --source /tmp/boxedwine-source
+          python3 build/boxedwine/fetch.py --cache /tmp/boxedwine-cache --source /tmp/boxedwine-source --wine /tmp/wine11.zip
           cmake -S build/boxedwine -B /tmp/boxedwine-ios -G Ninja \
             -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT='${{ matrix.sdk }}' \
             -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DBOXEDWINE_SOURCE=/tmp/boxedwine-source \
+            -DWINE32_PROBE_PAYLOAD=/tmp/payload -DWINE32_PROBE_ROOTFS=/tmp/wine11.zip \
             -DOSMESA_ROOT="$PWD/build/mesa-ios/out/${{ matrix.sdk }}" 2>&1 | tee /tmp/wine32-ios-configure.log
           cmake --build /tmp/boxedwine-ios --parallel 3 2>&1 | tee /tmp/wine32-ios-build.log
           xcrun vtool -show-build /tmp/boxedwine-ios/madeira-wine32-ios-link
+      - name: Run Windows installers and Direct3D through the UIKit host
+        if: matrix.sdk == 'iphonesimulator'
+        run: |
+          codesign --force --sign - /tmp/boxedwine-ios/MadeiraWine32Probe.app
+          python3 tests/wine32/ios/run_simulator.py --app /tmp/boxedwine-ios/MadeiraWine32Probe.app
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -60,6 +90,8 @@ jobs:
             build/mesa-ios/.work/${{ matrix.sdk }}/link-commands.txt
             /tmp/mesa-build.log
             /tmp/wine32-ios-*.log
+            /tmp/wine32-ios-*.json
+            /tmp/wine32-ios-*.png
             /tmp/boxedwine-ios/libmadeira-wine32-engine.a
             /tmp/boxedwine-ios/libbw_softfloat.a
             /tmp/boxedwine-ios/sdl2/libSDL2.a

@@ -36,6 +36,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
   set(VIDEO_VULKAN OFF CACHE BOOL "" FORCE)
   set(RENDER_METAL ON CACHE BOOL "" FORCE)
   add_subdirectory("${BW}/lib/sdl2" "${CMAKE_CURRENT_BINARY_DIR}/sdl2")
+  target_compile_definitions(SDL2-static PRIVATE SDL_MAIN_HANDLED)
   set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ios_platform.mm"
     PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   add_library(madeira-osmesa STATIC IMPORTED)
@@ -112,6 +113,24 @@ if(MADEIRA_IOS)
   add_executable(madeira-wine32-ios-link ios_link_smoke.c)
   set_target_properties(madeira-wine32-ios-link PROPERTIES LINKER_LANGUAGE CXX)
   target_link_libraries(madeira-wine32-ios-link PRIVATE madeira-wine32-engine)
+  set(WINE32_PROBE_PAYLOAD "" CACHE PATH "Directory of CI-built x86 Windows fixtures")
+  set(WINE32_PROBE_ROOTFS "" CACHE FILEPATH "Complete pinned Wine32 ZIP for iOS execution tests")
+  if(WINE32_PROBE_PAYLOAD AND WINE32_PROBE_ROOTFS)
+    set(ios_probe "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/wine32/ios")
+    add_executable(MadeiraWine32Probe MACOSX_BUNDLE "${ios_probe}/ProbeHost.mm"
+      "${WINE32_PROBE_PAYLOAD}" "${WINE32_PROBE_ROOTFS}")
+    set_source_files_properties("${WINE32_PROBE_PAYLOAD}" "${WINE32_PROBE_ROOTFS}"
+      PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    set_target_properties(MadeiraWine32Probe PROPERTIES
+      OBJCXX_STANDARD 20
+      MACOSX_BUNDLE_INFO_PLIST "${ios_probe}/Info.plist.in"
+      XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO)
+    target_include_directories(MadeiraWine32Probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(MadeiraWine32Probe PRIVATE -fobjc-arc)
+    target_compile_features(MadeiraWine32Probe PRIVATE cxx_std_20)
+    target_link_libraries(MadeiraWine32Probe PRIVATE madeira-wine32-engine
+      "-framework UIKit" "-framework QuartzCore")
+  endif()
 else()
   add_executable(madeira-wine32 embedded_runner.cpp)
   target_compile_features(madeira-wine32 PRIVATE cxx_std_20)

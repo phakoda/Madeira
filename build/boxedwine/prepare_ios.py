@@ -48,6 +48,12 @@ def prepare(root):
 
     pglFinish''')
     updates[path] = text
+    path = root / 'source/x11/xserver.cpp'
+    text = replace(path.read_text(), '#else\n\tU32 count = KSystem::getPixelFormatCount();',
+                   '#else\n    {\n\tU32 count = KSystem::getPixelFormatCount();')
+    text = replace(text, '\t}\n#endif\n}\n\nCLXFBConfigPtr XServer::getFbConfig',
+                   '\t}\n    }\n#endif\n}\n\nCLXFBConfigPtr XServer::getFbConfig')
+    updates[path] = text
     # Altered SDL UIKit backend: Madeira owns the window and parent controller.
     # SDL retains its own controller/Metal view, attached as a normal child.
     path = root / 'lib/sdl2/src/video/uikit/SDL_uikitview.m'

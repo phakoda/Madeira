@@ -18,6 +18,16 @@ The released browser build was considered and rejected. Its release notes explic
 
 No local compilation is permitted for this work. Compile and execution results come from GitHub Actions. This host proof is a step toward integration and does not establish iOS support.
 
+## Embedded lifecycle and current evidence
+
+`embedded.h` exposes start, one bounded CPU/input tick, stop, and a persistent error message. The host calls it serially on the UI thread. `prepare_embedded.py` separates upstream startup from its blocking loop and retains mounted ZIP files until cleanup. Fatal engine errors return through the C boundary. Failed cleanup prevents another session from reusing uncertain global state. Explicitly mounted Wine drives receive guest write permissions, so imported games can create saves next to their executable.
+
+The host execution job in [run 34723989701](https://github.com/phakoda/Madeira/actions/runs/34723989701) passed the complete native x86 memory/thread/registry/file fixture and the same-process restart fixture. Its installer and graphics stages were still running when this evidence was recorded. The earlier startup crash was traced by AddressSanitizer to calling the filesystem parent-path helper before its separator was initialized; the adapter now derives the executable directory without that helper.
+
+`build/mesa-ios` produces a pinned static Mesa 25.0.7 softpipe library with LLVM disabled. Both SDK variants passed archive architecture, symbol, executable-link, and Mach-O platform checks in [run 34723653929](https://github.com/phakoda/Madeira/actions/runs/34723653929). That establishes linkage, not rendered output.
+
+`prepare_ios.py` binds OSMesa statically and adapts SDL's UIKit presentation. `ios_view.h` attaches SDL's controller as a child of the host controller; SDL does not replace Madeira's application window. The iOS workflow also builds a small UIKit test app from `tests/wine32/ios`, with real x86 EXE/MSI fixtures and the complete Wine32 filesystem. Its Simulator run must produce guest-written results across runtime, installation, installed-EXE relaunch, and Direct3D stages. This execution check is not yet confirmed. The production app still needs backend packaging and launch routing.
+
 ## Work required before completion
 
 - Build the native interpreter for iPhoneOS and Simulator, including UIKit-compatible platform code.

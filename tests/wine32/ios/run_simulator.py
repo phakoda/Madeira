@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Execute the Wine32 UIKit test host in an isolated CI Simulator."""
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import time
+
+
+def sim(*args, **kwargs):
+    return subprocess.check_output(['xcrun', 'simctl', *map(str, args)], text=True, **kwargs).strip()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--app', type=Path, required=True)
+    args = parser.parse_args()
+    if os.environ.get('GITHUB_ACTIONS') != 'true':
+        parser.error('This execution fixture runs only in GitHub Actions')
+    runtimes = json.loads(sim('list', 'runtimes', '--json'))['runtimes']
+    runtimes = [r for r in runtimes if r.get('isAvailable') and '.iOS-' in r['identifier']]
+    runtime = max(runtimes, key=lambda r: tuple(map(int, r['version'].split('.'))))
+    device = sim('create', 'Madeira Wine32 CI', 'com.apple.CoreSimulator.SimDeviceType.iPhone-16', runtime['identifier'])
+    process = None
+    report = Path('/tmp/wine32-ios-session.json')
+    log = Path('/tmp/wine32-ios-session.log')
+    try:
+        sim('boot', device)
+        sim('bootstatus', device, '-b', timeout=180)
+        sim('install', device, args.app.resolve())
+        container = Path(sim('get_app_container', device, 'app.madeira.wine32probe', 'data'))
+        result = container / 'Documents/wine32-result.json'
+        with log.open('w') as output:
+            process = subprocess.Popen(['xcrun', 'simctl', 'launch', '--console', '--terminate-running-process',
+                device, 'app.madeira.wine32probe'], stdout=output, stderr=subprocess.STDOUT)
+            deadline = time.monotonic() + 1250
+            last_stage = None
+            while time.monotonic() < deadline:
+                if result.exists():
+                    state = json.loads(result.read_text())
+                    if state['detail'] != last_stage:
+                        last_stage = state['detail']
+                        print(state, flush=True)
+                        sim('io', device, 'screenshot', f'/tmp/wine32-ios-stage-{state["completedStages"]}.png')
+                    if state['status'] in ('passed', 'failed'):
+                        shutil.copyfile(result, report)
+                        if state['status'] != 'passed' or state['completedStages'] != 4:
+                            raise RuntimeError(f'iOS Windows execution failed: {state}')
+                        return
+                if process.poll() is not None:
+                    raise RuntimeError(f'Simulator app exited before completing the fixtures: {process.returncode}')
+                time.sleep(0.5)
+            raise TimeoutError('iOS Wine32 execution exceeded the fixture deadline')
+    finally:
+        subprocess.run(['xcrun', 'simctl', 'io', device, 'screenshot', '/tmp/wine32-ios-final.png'], check=False)
+        subprocess.run(['xcrun', 'simctl', 'terminate', device, 'app.madeira.wine32probe'], check=False)
+        if process:
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                process.wait(timeout=10)
+        subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
+        subprocess.run(['xcrun', 'simctl', 'delete', device], check=False)
+
+
+if __name__ == '__main__':
+    main()
