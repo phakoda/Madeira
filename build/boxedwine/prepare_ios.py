@@ -7,6 +7,13 @@ from prepare_embedded import replace
 
 def prepare(root):
     updates = {}
+    path = root / 'lib/sdl2/CMakeLists.txt'
+    # This SDL revision predates Metal on Simulator. Its old architecture test
+    # silently removes the only enabled UIKit renderer on current SDKs.
+    text = replace(path.read_text(),
+        '#if TARGET_OS_SIMULATOR || (!TARGET_CPU_X86_64 && !TARGET_CPU_ARM64)',
+        '#if !defined(__arm64__) && !defined(__aarch64__) && !defined(__x86_64__)')
+    updates[path] = text
     path = root / 'platform/linux/platform.cpp'
     text = path.read_text()
     text = replace(text, '#ifndef __MACH__\nint getPixelFormats',
