@@ -1,0 +1,19 @@
+name: Dispatch Madeira IPA build loop
+
+on:
+  push:
+    branches:
+      - codex/library-ui-and-installer-imports
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Build Madeira IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-ipa.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"
