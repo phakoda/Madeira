@@ -1,0 +1,12 @@
+{
+  "source": {
+    "revision": "296ff0fa14e0dd1debb0f5898e2e33504f2ad066",
+    "url": "https://api.github.com/repos/danoon2/Boxedwine/tarball/296ff0fa14e0dd1debb0f5898e2e33504f2ad066",
+    "sha256": "417c0500d7ef7d38ccbf67b0f5fec18f90590de68d7aeee16ba1acc7b7d6e307"
+  },
+  "wine": {
+    "version": "11.0",
+    "url": "https://boxedwine.org/v2/6/TinyCore15Wine11.0.zip",
+    "sha256": "8cb669813037589597a2f08c30fb7b8dc965a53e1344757f69ce5cb0f1958820"
+  }
+}
