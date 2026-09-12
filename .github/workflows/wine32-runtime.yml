@@ -20,7 +20,7 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build libsdl2-dev libgl-dev zlib1g-dev gcc-mingw-w64-i686 xvfb
+          sudo apt-get install -y clang cmake ninja-build libsdl2-dev libgl-dev zlib1g-dev gcc-mingw-w64-i686 xvfb wixl
       - uses: actions/cache@v4
         with:
           path: .wine32-cache
@@ -37,6 +37,9 @@ jobs:
         run: |
           mkdir -p /tmp/wine32-probe /tmp/wine32-prefix
           i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/runtime_probe.c -ladvapi32 -o /tmp/wine32-probe/probe.exe
+          i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/graphics_probe.c -ld3d9 -luser32 -o /tmp/wine32-probe/graphics.exe
+          cp tests/wine32/probe.wxs /tmp/wine32-probe/
+          (cd /tmp/wine32-probe && wixl -a x86 -o probe.msi probe.wxs)
           python3 tools/inspect-windows-executable.py /tmp/wine32-probe/probe.exe
       - name: Execute probe through emulated Wine32
         env:
@@ -53,8 +56,43 @@ jobs:
           assert Path('/tmp/wine32-probe/32 bit result.txt').read_text() == 'native-x86-wine-memory-threads-registry-file-ok\n'
           print('Real x86 PE executed memory, thread, registry and file APIs through Wine32')
           PY
+      - name: Install MSI and launch its installed executable
+        env:
+          SDL_AUDIODRIVER: dummy
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -o pipefail
+          timeout 240 xvfb-run -a /tmp/boxedwine-build/madeira-wine32 \
+            -root /tmp/wine32-prefix -zip "$PWD/.wine32-cache/wine11.zip" \
+            -mount_drive /tmp/wine32-probe d -disableLinearMemory -nosound -env WINEDEBUG=-all \
+            /bin/wine msiexec /i 'D:\probe.msi' /qn /norestart 2>&1 | tee /tmp/wine32-msi.log
+          rm '/tmp/wine32-probe/32 bit result.txt'
+          timeout 240 xvfb-run -a /tmp/boxedwine-build/madeira-wine32 \
+            -root /tmp/wine32-prefix -zip "$PWD/.wine32-cache/wine11.zip" \
+            -mount_drive /tmp/wine32-probe d -disableLinearMemory -nosound -env WINEDEBUG=-all \
+            /bin/wine 'C:\Program Files\Madeira32Probe\probe.exe' 2>&1 | tee /tmp/wine32-installed.log
+          python3 - <<'PY'
+          from pathlib import Path
+          assert Path('/tmp/wine32-probe/32 bit result.txt').read_text() == 'native-x86-wine-memory-threads-registry-file-ok\n'
+          print('MSI installed and the installed x86 EXE ran in a later session')
+          PY
+      - name: Verify x86 Direct3D 9 rendering and Windows callback
+        env:
+          SDL_AUDIODRIVER: dummy
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -o pipefail
+          timeout 240 xvfb-run -a /tmp/boxedwine-build/madeira-wine32 \
+            -root /tmp/wine32-prefix -zip "$PWD/.wine32-cache/wine11.zip" \
+            -mount_drive /tmp/wine32-probe d -disableLinearMemory -nosound -env WINEDEBUG=-all \
+            /bin/wine 'D:\graphics.exe' 2>&1 | tee /tmp/wine32-graphics.log
+          python3 - <<'PY'
+          from pathlib import Path
+          assert Path('/tmp/wine32-probe/graphics result.txt').read_text() == 'native-x86-d3d9-render-target-pixels-ok\n'
+          print('x86 Direct3D 9 produced all 4096 expected render-target pixels')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: wine32-runtime-log
-          path: /tmp/wine32-runtime.log
+          path: /tmp/wine32-*.log

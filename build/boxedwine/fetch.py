@@ -43,6 +43,8 @@ def source(cache, destination):
     spec = MANIFEST['source']
     marker = destination / '.madeira-source-revision'
     if marker.is_file() and marker.read_text().strip() == spec['revision']:
+        if not (destination / 'tools/opengl/gldef.h').is_file():
+            raise ValueError(f'Source cache lacks generated OpenGL headers; use a fresh --source directory: {destination}')
         return
     if destination.exists():
         raise ValueError(f'Refusing to replace an existing source directory: {destination}')
@@ -56,7 +58,7 @@ def source(cache, destination):
             # contains prebuilt macOS frameworks and symlinks, which are not used.
             for member in tar:
                 parts = PurePosixPath(member.name).parts[1:]
-                if not parts or parts[0] not in {'include', 'source', 'platform', 'lib', 'license.txt'}:
+                if not parts or parts[0] not in {'include', 'source', 'platform', 'lib', 'tools', 'license.txt'}:
                     continue
                 if '..' in parts or PurePosixPath(member.name).is_absolute():
                     raise ValueError('Invalid archive path')
