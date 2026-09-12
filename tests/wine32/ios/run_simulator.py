@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import time
+from check_screen import green_pixel_count
 
 
 def sim(*args, **kwargs):
@@ -32,12 +33,25 @@ def main():
         sim('install', device, args.app.resolve())
         container = Path(sim('get_app_container', device, 'app.madeira.wine32probe', 'data'))
         result = container / 'Documents/wine32-result.json'
+        payload = container / 'Documents/payload'
         with log.open('w') as output:
             process = subprocess.Popen(['xcrun', 'simctl', 'launch', '--console', '--terminate-running-process',
                 device, 'app.madeira.wine32probe'], stdout=output, stderr=subprocess.STDOUT)
             deadline = time.monotonic() + 1250
             last_stage = None
+            presentation_seen = False
             while time.monotonic() < deadline:
+                if not presentation_seen and (payload / 'graphics ready.txt').exists():
+                    screenshot = Path('/tmp/wine32-ios-presented.png')
+                    # Allow the queued Metal frame to reach the Simulator display.
+                    time.sleep(1)
+                    sim('io', device, 'screenshot', screenshot)
+                    green_pixels = green_pixel_count(screenshot)
+                    if green_pixels < 100:
+                        raise RuntimeError(f'Direct3D rendered offscreen but its green frame is missing from the iOS display: {green_pixels} pixels')
+                    (payload / 'graphics captured.txt').write_text('display-verified\n')
+                    presentation_seen = True
+                    print(f'Confirmed {green_pixels} green pixels on the Simulator display', flush=True)
                 if result.exists():
                     state = json.loads(result.read_text())
                     if state['detail'] != last_stage:
@@ -46,7 +60,7 @@ def main():
                         sim('io', device, 'screenshot', f'/tmp/wine32-ios-stage-{state["completedStages"]}.png')
                     if state['status'] in ('passed', 'failed'):
                         shutil.copyfile(result, report)
-                        if state['status'] != 'passed' or state['completedStages'] != 4:
+                        if state['status'] != 'passed' or state['completedStages'] != 4 or not presentation_seen:
                             raise RuntimeError(f'iOS Windows execution failed: {state}')
                         return
                 if process.poll() is not None:

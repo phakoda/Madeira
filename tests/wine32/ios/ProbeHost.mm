@@ -72,7 +72,8 @@
     NSMutableArray<NSString*>* arguments = [@[@"madeira-wine32", @"-root", prefix.path,
         @"-zip", graphics, @"-zip", rootfs,
         @"-mount_drive", self.payload.path, @"d", @"-opengl", @"osmesa", @"-nosound",
-        @"-env", @"WINEDEBUG=-all,err+all", @"-env", @"WINEDLLOVERRIDES=mscoree,mshtml=", @"/bin/wine"] mutableCopy];
+        @"-env", @"WINEDEBUG=-all,err+all", @"-env", @"WINEDLLOVERRIDES=mscoree,mshtml=",
+        @"-env", @"MADEIRA_VERIFY_PRESENTATION=1", @"/bin/wine"] mutableCopy];
     [arguments addObjectsFromArray:stage[@"args"]];
     std::vector<const char*> argv;
     for (NSString* argument in arguments) argv.push_back(argument.UTF8String);

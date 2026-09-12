@@ -49,6 +49,37 @@ int main(void) {
         for (int x = 0; x < 64; ++x) if (row[x] != 0xff12ab34) return 40;
     }
     IDirect3DSurface9_UnlockRect(readback);
+    // Readback alone can pass while the host window is black. Present the same
+    // color through Wine's window, then let the iOS runner inspect its screen.
+    IDirect3DSurface9 *backbuffer = NULL;
+    if (FAILED(IDirect3DDevice9_GetBackBuffer(device, 0, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer))) return 43;
+    if (FAILED(IDirect3DDevice9_SetRenderTarget(device, 0, backbuffer))) return 44;
+    IDirect3DSurface9_Release(backbuffer);
+    if (FAILED(IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff12ab34, 1.0f, 0))) return 45;
+    if (FAILED(IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL))) return 46;
+    WCHAR verify[4];
+    if (GetEnvironmentVariableW(L"MADEIRA_VERIFY_PRESENTATION", verify, 4)) {
+        HANDLE ready = CreateFileW(L"D:\\graphics ready.txt", GENERIC_WRITE, 0, NULL,
+                                  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (ready == INVALID_HANDLE_VALUE) return 47;
+        CloseHandle(ready);
+        int captured = 0;
+        for (int attempt = 0; attempt < 600; ++attempt) {
+            MSG message;
+            while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            if (GetFileAttributesW(L"D:\\graphics captured.txt") != INVALID_FILE_ATTRIBUTES) {
+                captured = 1;
+                break;
+            }
+            IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff12ab34, 1.0f, 0);
+            IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+            Sleep(100);
+        }
+        if (!captured) return 48;
+    }
     IDirect3DSurface9_Release(readback);
     IDirect3DSurface9_Release(target);
     IDirect3DDevice9_Release(device);

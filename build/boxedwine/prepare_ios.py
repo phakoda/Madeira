@@ -13,6 +13,34 @@ def prepare(root):
     text = replace(path.read_text(),
         '#if TARGET_OS_SIMULATOR || (!TARGET_CPU_X86_64 && !TARGET_CPU_ARM64)',
         '#if !defined(__arm64__) && !defined(__aarch64__) && !defined(__x86_64__)')
+    text = replace(text,
+        '      set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -x objective-c")\n      check_c_source_compiles("',
+        '      include(CheckSourceCompiles)\n      check_source_compiles(OBJC "')
+    updates[path] = text
+    path = root / 'lib/sdl2/src/video/SDL_video.c'
+    text = replace(path.read_text(),
+        '#if (SDL_VIDEO_OPENGL && __MACOSX__) || __IPHONEOS__ || __ANDROID__ || __NACL__',
+        '#if (SDL_VIDEO_OPENGL && __MACOSX__) || (__IPHONEOS__ && SDL_VIDEO_OPENGL_ES2) || __ANDROID__ || __NACL__')
+    updates[path] = text
+    path = root / 'platform/sdl/knativescreenSDL.cpp'
+    text = replace(path.read_text(), '            klog_fmt("SDL_CreateWindow failed: %s", SDL_GetError());',
+        '''#ifdef MADEIRA_IOS
+            kpanic_fmt("SDL_CreateWindow failed: %s", SDL_GetError());
+#else
+            klog_fmt("SDL_CreateWindow failed: %s", SDL_GetError());
+#endif''')
+    text = replace(text, '''                renderer = SDL_CreateRenderer(window, -1, flags);
+            }
+        }
+    }
+}''', '''                renderer = SDL_CreateRenderer(window, -1, flags);
+            }
+#ifdef MADEIRA_IOS
+            if (!renderer) kpanic_fmt("SDL renderer failed: %s", SDL_GetError());
+#endif
+        }
+    }
+}''')
     updates[path] = text
     path = root / 'platform/linux/platform.cpp'
     text = path.read_text()
