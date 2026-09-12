@@ -26,6 +26,10 @@ No linker changes to remove page zero, architecture-check bypass, or unsupported
 
 ## Translation-layer requirements
 
+`app/Madeira/GuestMemory32.h` and `GuestMemory32.cpp` now implement a process-owned sparse guest memory service. It reserves 32-bit address ranges, commits zeroed backing on demand, translates checked reads/writes/instruction fetches, enforces 4 KiB software permissions, and provides serialized compare/exchange and scoped native access. See [the memory service contract and integration status](GUEST_MEMORY_TRANSLATION.md).
+
+This is an implemented memory component, not an enabled Wine/FEX backend. The current executable launch restriction remains. Neither SteamSetup.exe nor a native x86 game can run through this service yet.
+
 A software memory translation layer is a possible engineering route. It must keep 32-bit guest addresses separate from their host backing addresses throughout instruction execution, memory allocation, PE loading, Wine API pointer conversion, callbacks, exceptions, thread state, and shared memory. Translating CPU instructions alone does not satisfy those requirements.
 
 The other architectural option is a full-system x86 emulator with a separate Windows installation. That would be a separate backend rather than enabling the current Wine/FEX integration.

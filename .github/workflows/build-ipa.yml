@@ -44,6 +44,9 @@ jobs:
           python3 tests/check-library-source.py
           bash tests/run-library-tests.sh
 
+      - name: Verify guest memory translation
+        run: bash tests/run-guest-memory-tests.sh
+
       - name: Host dependencies
         run: |
           set -euxo pipefail

@@ -9,6 +9,7 @@ for tool in "$CC" "${CXX:-clang++}" swiftc python3; do
     command -v "$tool" >/dev/null || { echo "Required tool missing: $tool" >&2; exit 2; }
 done
 python3 "$ROOT/tests/check-project.py"
+bash "$ROOT/tests/run-guest-memory-tests.sh"
 while IFS= read -r source; do swiftc -frontend -parse "$source"; done < <(
     python3 "$ROOT/tests/check-project.py" --swift-paths)
 CFLAGS=(-std=c11 -Wall -Wextra -Werror -g -O1)

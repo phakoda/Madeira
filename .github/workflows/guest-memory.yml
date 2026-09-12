@@ -1,0 +1,32 @@
+name: Guest memory translation tests
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'app/Madeira/GuestMemory32.*'
+      - 'tests/guest_memory32*'
+      - 'tests/run-guest-memory-tests.sh'
+      - '.github/workflows/guest-memory.yml'
+  pull_request:
+    paths:
+      - 'app/Madeira/GuestMemory32.*'
+      - 'tests/guest_memory32*'
+      - 'tests/run-guest-memory-tests.sh'
+      - '.github/workflows/guest-memory.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  memory:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and exercise memory service with sanitizers
+        run: bash tests/run-guest-memory-tests.sh
