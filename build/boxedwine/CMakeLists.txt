@@ -35,6 +35,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
   set(VIDEO_OPENGLES OFF CACHE BOOL "" FORCE)
   set(VIDEO_VULKAN OFF CACHE BOOL "" FORCE)
   set(RENDER_METAL ON CACHE BOOL "" FORCE)
+  string(TOLOWER "${CMAKE_OSX_SYSROOT}" shader_sysroot)
+  if(shader_sysroot MATCHES "iphonesimulator")
+    set(shader_sdk iphonesimulator)
+  else()
+    set(shader_sdk iphoneos)
+  endif()
+  execute_process(COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/build_ios_shaders.py" --source "${BW}" --sdk "${shader_sdk}"
+    COMMAND_ERROR_IS_FATAL ANY)
   add_subdirectory("${BW}/lib/sdl2" "${CMAKE_CURRENT_BINARY_DIR}/sdl2")
   target_compile_definitions(SDL2-static PRIVATE SDL_MAIN_HANDLED)
   # This vendored SDL sets a C90 compatibility warning to error even in its
@@ -84,6 +93,14 @@ endif()
 file(GLOB softfloat CONFIGURE_DEPENDS
   "${BW}/lib/softfloat/source/*.c" "${BW}/lib/softfloat/source/8086-SSE/*.c")
 add_library(bw_softfloat STATIC ${softfloat})
+set(softfloat_namespace "${CMAKE_CURRENT_BINARY_DIR}/madeira-softfloat-namespace.h")
+execute_process(COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/namespace_softfloat.py" --source "${BW}" --output "${softfloat_namespace}"
+  COMMAND_ERROR_IS_FATAL ANY)
+add_custom_command(TARGET bw_softfloat POST_BUILD
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/check_softfloat_symbols.py"
+    --archive "$<TARGET_FILE:bw_softfloat>"
+  VERBATIM)
 target_include_directories(bw_softfloat PRIVATE
   "${BW}/lib/softfloat/source/include" "${BW}/lib/softfloat/source"
   "${BW}/lib/softfloat/source/8086-SSE")
@@ -104,6 +121,7 @@ target_include_directories(madeira-wine32-engine PRIVATE
   "${BW}/include" "${BW}/lib/simde" "${BW}/lib/asmjit"
   "${BW}/lib/zlib/contrib/minizip")
 target_compile_options(madeira-wine32-engine PRIVATE
+  -include "${softfloat_namespace}"
   $<$<COMPILE_LANGUAGE:CXX>:-Wno-invalid-offsetof>)
 target_link_libraries(madeira-wine32-engine PRIVATE
   bw_softfloat ${platform_libraries} ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
@@ -114,7 +132,7 @@ endif()
 
 if(MADEIRA_IOS)
   add_executable(madeira-wine32-ios-link ios_link_smoke.c)
-  set_target_properties(madeira-wine32-ios-link PROPERTIES LINKER_LANGUAGE CXX)
+  set_target_properties(madeira-wine32-ios-link PROPERTIES LINKER_LANGUAGE CXX MACOSX_BUNDLE FALSE)
   target_link_libraries(madeira-wine32-ios-link PRIVATE madeira-wine32-engine)
   set(WINE32_PROBE_PAYLOAD "" CACHE PATH "Directory of CI-built x86 Windows fixtures")
   set(WINE32_PROBE_ROOTFS "" CACHE FILEPATH "Complete pinned Wine32 ZIP for iOS execution tests")
