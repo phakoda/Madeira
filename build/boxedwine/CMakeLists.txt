@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(MadeiraWine32 LANGUAGES C CXX)
+option(MADEIRA_SANITIZE "Use AddressSanitizer in host execution tests" OFF)
 
 # This target exercises the native interpreter and full Wine filesystem before
 # embedding them in the iOS host. It deliberately has no native-code JIT flags.
@@ -100,6 +101,10 @@ target_compile_options(madeira-wine32-engine PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-Wno-invalid-offsetof>)
 target_link_libraries(madeira-wine32-engine PRIVATE
   bw_softfloat ${platform_libraries} ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
+if(MADEIRA_SANITIZE)
+  target_compile_options(madeira-wine32-engine PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(madeira-wine32-engine INTERFACE -fsanitize=address)
+endif()
 
 if(MADEIRA_IOS)
   add_executable(madeira-wine32-ios-link ios_link_smoke.c)

@@ -19,6 +19,7 @@ env:
   GIT_CONFIG_COUNT: '1'
   GIT_CONFIG_KEY_0: http.userAgent
   GIT_CONFIG_VALUE_0: 'OpenAI File Downloader, XaiImageApiFetch/1.0'
+  ASAN_OPTIONS: detect_leaks=0
 
 jobs:
   interpreter:
@@ -40,7 +41,7 @@ jobs:
         run: |
           cmake -S build/boxedwine -B /tmp/boxedwine-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-            -DBOXEDWINE_SOURCE=/tmp/boxedwine-source
+            -DBOXEDWINE_SOURCE=/tmp/boxedwine-source -DMADEIRA_SANITIZE=ON
           cmake --build /tmp/boxedwine-build --parallel 2
       - name: Compile an actual x86 Windows probe
         run: |
