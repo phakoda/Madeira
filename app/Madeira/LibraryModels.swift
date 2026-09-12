@@ -82,27 +82,40 @@ enum LibraryFiles {
         let canonicalDrive = drive.resolvingSymlinksInPath().standardizedFileURL
         let root = try directory.map { try directoryURL($0, drive: drive) } ?? canonicalDrive
         guard fm.fileExists(atPath: root.path) else { return [] }
-        var failure: Error?
-        guard let iterator = fm.enumerator(at: root,
-            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles], errorHandler: { _, error in failure = error; return false }) else {
-            throw LibraryError.message("The Windows drive could not be read.")
-        }
+
         var results: [ExecutableChoice] = []
-        for case let file as URL in iterator {
-            let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey])
-            if values.isSymbolicLink == true { iterator.skipDescendants(); continue }
-            if directory == nil, values.isDirectory == true,
-               ["windows", "madeira"].contains(file.lastPathComponent.lowercased()),
-               file.deletingLastPathComponent().standardizedFileURL == canonicalDrive {
-                iterator.skipDescendants(); continue
+        var pending = [root]
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey]
+
+        while let folder = pending.popLast() {
+            let entries = try fm.contentsOfDirectory(at: folder,
+                includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles])
+            for file in entries {
+                let values = try file.resourceValues(forKeys: keys)
+                if values.isSymbolicLink == true { continue }
+
+                let resolved = file.resolvingSymlinksInPath().standardizedFileURL
+                guard resolved.path.hasPrefix(canonicalDrive.path + "/") else {
+                    throw LibraryError.message("The Windows drive contains a file outside its root.")
+                }
+
+                if values.isDirectory == true {
+                    if directory == nil,
+                       folder.standardizedFileURL == canonicalDrive,
+                       ["windows", "madeira"].contains(file.lastPathComponent.lowercased()) {
+                        continue
+                    }
+                    pending.append(resolved)
+                    continue
+                }
+
+                guard values.isRegularFile == true, file.pathExtension.lowercased() == "exe" else { continue }
+                let relative = String(resolved.path.dropFirst(canonicalDrive.path.count + 1))
+                _ = try url(for: relative, drive: drive)
+                results.append(ExecutableChoice(path: relative))
             }
-            guard values.isRegularFile == true, file.pathExtension.lowercased() == "exe" else { continue }
-            let relative = String(file.path.dropFirst(canonicalDrive.path.count + 1))
-            _ = try url(for: relative, drive: drive)
-            results.append(ExecutableChoice(path: relative))
         }
-        if let failure { throw failure }
+
         return results.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 
