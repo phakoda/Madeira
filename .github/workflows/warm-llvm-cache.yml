@@ -1,0 +1,125 @@
+name: Warm LLVM Cache
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IOS_DEPLOYMENT_TARGET: "17.0"
+  CACHE_V: "1"
+
+jobs:
+  llvm:
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euxo pipefail
+          NEWEST="$(ls -d /Applications/Xcode_2*.app 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -n "$NEWEST" ]; then
+            SELECTED="$NEWEST/Contents/Developer"
+          else
+            FALLBACK="$(ls -d /Applications/Xcode_1*.app | sort -V | tail -1)"
+            SELECTED="$FALLBACK/Contents/Developer"
+          fi
+          export DEVELOPER_DIR="$SELECTED"
+          echo "DEVELOPER_DIR=$SELECTED" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$SELECTED"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Host build tools
+        run: |
+          set -euxo pipefail
+          brew install cmake ninja
+
+      - name: Restore LLVM iOS cache
+        id: llvm
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            toolchains/llvm-project
+            toolchains/llvm-ios-build
+            toolchains/llvm-host
+          key: llvm-1507-ios-pruned-${{ env.CACHE_V }}
+
+      - name: LLVM 15.0.7 for iOS
+        if: steps.llvm.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          rm -rf toolchains/llvm-project toolchains/llvm-host toolchains/llvm-ios-build
+          git clone --depth 1 --branch llvmorg-15.0.7 \
+            https://github.com/llvm/llvm-project toolchains/llvm-project
+          sed -i '' 's/MATCHES "Darwin"/MATCHES "Darwin|iOS"/' \
+            toolchains/llvm-project/llvm/cmake/modules/AddLLVM.cmake
+
+          cmake -S toolchains/llvm-project/llvm -B toolchains/llvm-host -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF
+          cmake --build toolchains/llvm-host --target llvm-tblgen \
+            --parallel "$(sysctl -n hw.ncpu)"
+
+          cmake -S toolchains/llvm-project/llvm -B toolchains/llvm-ios-build -G Ninja \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT="$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" \
+            -DCMAKE_MACOSX_BUNDLE=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_TABLEGEN="$PWD/toolchains/llvm-host/bin/llvm-tblgen" \
+            -DLLVM_TARGETS_TO_BUILD="" \
+            -DLLVM_BUILD_TOOLS=OFF \
+            -DLLVM_INCLUDE_TOOLS=OFF \
+            -DLLVM_BUILD_UTILS=OFF \
+            -DLLVM_INCLUDE_UTILS=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_RUNTIMES=OFF \
+            -DLLVM_ENABLE_TERMINFO=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF
+          cmake --build toolchains/llvm-ios-build \
+            --parallel "$(sysctl -n hw.ncpu)"
+
+          ls toolchains/llvm-ios-build/lib/*.a | head
+
+          # Keep only what DXMT consumes so the cache stays small.
+          rm -rf toolchains/llvm-host
+          find toolchains/llvm-ios-build -mindepth 1 -maxdepth 1 \
+            ! -name lib ! -name include -exec rm -rf {} +
+          find toolchains/llvm-ios-build/lib -mindepth 1 -maxdepth 1 \
+            ! -name '*.a' -exec rm -rf {} +
+          find toolchains/llvm-project -mindepth 1 -maxdepth 1 \
+            ! -name llvm -exec rm -rf {} +
+          find toolchains/llvm-project/llvm -mindepth 1 -maxdepth 1 \
+            ! -name include -exec rm -rf {} +
+          du -sh toolchains/llvm-ios-build toolchains/llvm-project
+
+      # Save NOW, not in a post-job hook. Once this step succeeds, a later
+      # workflow/DXMT failure cannot discard the completed LLVM build.
+      - name: Save LLVM iOS cache immediately
+        if: steps.llvm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            toolchains/llvm-project
+            toolchains/llvm-ios-build
+            toolchains/llvm-host
+          key: llvm-1507-ios-pruned-${{ env.CACHE_V }}
+
+      - name: Confirm LLVM cache
+        run: |
+          set -euxo pipefail
+          test -d toolchains/llvm-project/llvm/include
+          test -d toolchains/llvm-ios-build/include
+          ls toolchains/llvm-ios-build/lib/*.a >/dev/null
+          echo "LLVM cache is ready: llvm-1507-ios-pruned-${CACHE_V}"
