@@ -2,6 +2,7 @@
 #define _UNICODE
 #include <windows.h>
 #include <stdint.h>
+#include <stdio.h>
 
 static volatile LONG counter;
 static DWORD WINAPI worker(void *ignored) {
@@ -11,6 +12,7 @@ static DWORD WINAPI worker(void *ignored) {
 }
 
 int main(void) {
+    puts("probe: entered x86 Windows main"); fflush(stdout);
     if (sizeof(void *) != 4) return 10;
     SYSTEM_INFO info;
     GetSystemInfo(&info);
@@ -23,6 +25,7 @@ int main(void) {
     DWORD old;
     if (!VirtualProtect(memory, 4096, PAGE_READONLY, &old)) return 14;
     if (!VirtualFree(memory, 0, MEM_RELEASE)) return 15;
+    puts("probe: guest virtual memory passed"); fflush(stdout);
     HANDLE threads[2];
     for (int i = 0; i < 2; ++i) {
         threads[i] = CreateThread(NULL, 0, worker, NULL, 0, NULL);
@@ -31,6 +34,7 @@ int main(void) {
     if (WaitForMultipleObjects(2, threads, TRUE, 30000) != WAIT_OBJECT_0) return 17;
     for (int i = 0; i < 2; ++i) CloseHandle(threads[i]);
     if (counter != 2000) return 18;
+    puts("probe: guest threads passed"); fflush(stdout);
 
     HKEY key;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Madeira\\RuntimeProbe32", 0,
@@ -38,6 +42,7 @@ int main(void) {
     DWORD value = 32;
     if (RegSetValueExW(key, L"Architecture", 0, REG_DWORD, (const BYTE *)&value, sizeof(value)) != ERROR_SUCCESS) return 20;
     RegCloseKey(key);
+    puts("probe: registry passed"); fflush(stdout);
 
     HANDLE file = CreateFileW(L"D:\\32 bit result.txt", GENERIC_WRITE, 0, NULL,
                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
