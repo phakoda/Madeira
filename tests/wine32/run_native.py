@@ -26,7 +26,11 @@ def main():
     log = Path('/tmp') / f'wine32-{args.name}.log'
     argv = [str(args.engine), '-root', str(args.prefix), '-zip', str(args.rootfs),
             '-mount_drive', str(args.payload), 'd', '-disableLinearMemory', '-nosound',
-            '-env', 'WINEDEBUG=-all,err+all'] + command
+            '-env', 'WINEDEBUG=-all,err+all',
+            # These fixtures are native PE32 programs. Prefix initialization
+            # must not wait for interactive downloads of optional .NET/HTML
+            # runtimes, which neither fixture uses.
+            '-env', 'WINEDLLOVERRIDES=mscoree,mshtml='] + command
 
     def screenshot(label):
         path = Path('/tmp') / f'wine32-{args.name}-{label}.png'
