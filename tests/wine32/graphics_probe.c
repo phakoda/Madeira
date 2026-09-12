@@ -4,9 +4,13 @@
 #include <windows.h>
 #include <d3d9.h>
 #include <stdint.h>
+#include <stdio.h>
+
+static int received_tab;
 
 static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
     if (message == WM_APP + 1) return 0x1234;
+    if (message == WM_KEYDOWN && w == VK_TAB) received_tab = 1;
     return DefWindowProcW(window, message, w, l);
 }
 
@@ -19,6 +23,8 @@ int main(void) {
     HWND window = CreateWindowW(klass.lpszClassName, L"Madeira 32-bit graphics",
         WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 128, 128, NULL, NULL, klass.hInstance, NULL);
     if (!window || SendMessageW(window, WM_APP + 1, 0, 0) != 0x1234) return 31;
+    SetForegroundWindow(window);
+    SetFocus(window);
     IDirect3D9 *d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!d3d) return 32;
     D3DPRESENT_PARAMETERS params = {0};
@@ -70,7 +76,7 @@ int main(void) {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
-            if (GetFileAttributesW(L"D:\\graphics captured.txt") != INVALID_FILE_ATTRIBUTES) {
+            if (received_tab && GetFileAttributesW(L"D:\\graphics captured.txt") != INVALID_FILE_ATTRIBUTES) {
                 captured = 1;
                 break;
             }
@@ -78,7 +84,10 @@ int main(void) {
             IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
             Sleep(100);
         }
-        if (!captured) return 48;
+        if (!captured) {
+            fprintf(stderr, "Presentation/input verification timed out; received Tab: %d\n", received_tab);
+            return 48;
+        }
     }
     IDirect3DSurface9_Release(readback);
     IDirect3DSurface9_Release(target);

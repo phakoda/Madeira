@@ -13,6 +13,7 @@
 @property(nonatomic) NSUInteger stage;
 @property(nonatomic) CFTimeInterval started;
 @property(nonatomic) BOOL pumping;
+@property(nonatomic) BOOL sentKey;
 @end
 
 @implementation MadeiraWine32Probe
@@ -60,6 +61,16 @@
         return;
     }
     NSDictionary* stage = self.stages[self.stage];
+    if (self.stage == 3) {
+        // Replacing SwiftUI's layout can attach the new host before the old
+        // representable is dismantled. The stale removal must leave it live.
+        UIViewController* old = self.window.rootViewController;
+        UIViewController* replacement = [UIViewController new];
+        replacement.view.backgroundColor = UIColor.blackColor;
+        self.window.rootViewController = replacement;
+        madeira_wine32_set_view_host(replacement);
+        madeira_wine32_remove_view_host(old);
+    }
     [NSFileManager.defaultManager removeItemAtURL:[self.payload URLByAppendingPathComponent:stage[@"file"]] error:nil];
     NSURL* prefix = [self.documents URLByAppendingPathComponent:@"prefix" isDirectory:YES];
     NSError* error = nil;
@@ -93,6 +104,12 @@
     const int state = madeira_wine32_tick();
     self.pumping = NO;
     NSDictionary* stage = self.stages[self.stage];
+    if (self.stage == 3 && !self.sentKey && [NSFileManager.defaultManager fileExistsAtPath:
+        [self.payload URLByAppendingPathComponent:@"graphics ready.txt"].path]) {
+        madeira_wine32_key(43, 1);
+        madeira_wine32_key(43, 0);
+        self.sentKey = YES;
+    }
     NSString* actual = [NSString stringWithContentsOfURL:[self.payload URLByAppendingPathComponent:stage[@"file"]]
         encoding:NSUTF8StringEncoding error:nil];
     if ([[actual stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] isEqualToString:stage[@"expected"]]) {
