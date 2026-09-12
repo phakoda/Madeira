@@ -40,3 +40,5 @@ After building the IPA, device acceptance should cover:
 4. Return to the library while a game runs, then resume. Confirm the Metal view and touch overlays stay hidden over the library.
 5. Rotate on iPhone and iPad. Test the keyboard, physical mouse, controller, and touch controls inside the full-screen session.
 6. Check search, favorites, sorting, list layout, large accessibility text, artwork, and errors for missing files or full storage.
+
+The library and Settings include a standalone **Enable JIT** button. See [native 32-bit support findings](32_BIT_SUPPORT.md) for the Steam installer and x86 runtime constraints.

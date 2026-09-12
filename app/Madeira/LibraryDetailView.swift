@@ -64,6 +64,7 @@ struct LibraryDetailView: View {
     @State private var chooseExecutable = false
     @State private var confirmRemoval = false
     @State private var showSaved = false
+    @State private var architecture = "Checking architecture…"
 
     private var item: LibraryItem? { library.items.first { $0.id == itemID } }
     var body: some View {
@@ -112,6 +113,7 @@ struct LibraryDetailView: View {
                             .disabled(item.executable?.lowercased().hasSuffix(".msi") == true)
                             Divider()
                             Text("Executable").font(.headline)
+                            Text(architecture).font(.subheadline.weight(.medium)).foregroundStyle(MadeiraStyle.accent)
                             Text(item.executable?.replacingOccurrences(of: "/", with: " / ") ?? "Choose the main .exe from this game's folder.")
                                 .font(.footnote).foregroundStyle(MadeiraStyle.secondary).textSelection(.enabled)
                             if item.executable?.lowercased().hasSuffix(".msi") != true {
@@ -143,6 +145,17 @@ struct LibraryDetailView: View {
                     }
                 }
                 .onAppear { name = item.name; arguments = item.arguments.joined(separator: "\n") }
+                .task(id: item.executable) {
+                    guard let path = item.executable else { architecture = "No executable selected"; return }
+                    architecture = "Checking architecture…"
+                    let result = await Task.detached(priority: .utility) { () -> String in
+                        do {
+                            let machine = try LibraryFiles.executableMachine(path)
+                            return machine.map { LibraryFiles.architectureLabel($0) } ?? "MSI package · payload architecture varies"
+                        } catch { return error.localizedDescription }
+                    }.value
+                    if !Task.isCancelled { architecture = result }
+                }
                 .onChange(of: name) { _, _ in showSaved = false }
                 .onChange(of: arguments) { _, _ in showSaved = false }
                 .sheet(isPresented: $chooseExecutable) {
@@ -204,6 +217,8 @@ struct ExecutablePickerView: View {
                         Button { choose(choice) } label: {
                             VStack(alignment: .leading, spacing: 6) {
                                 Label(choice.name, systemImage: "app.dashed").font(.headline)
+                                Text(choice.architectureLabel).font(.caption.weight(.semibold))
+                                    .foregroundStyle(choice.machine == 0x014c ? .orange : MadeiraStyle.accent)
                                 Text(choice.path).font(.caption).foregroundStyle(.secondary)
                                     .lineLimit(3).multilineTextAlignment(.leading)
                             }

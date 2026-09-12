@@ -24,7 +24,9 @@ struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
 
 struct ExecutableChoice: Identifiable, Sendable {
     let path: String
+    var machine: UInt16? = nil
     var id: String { path }
+    var architectureLabel: String { LibraryFiles.architectureLabel(machine) }
     var name: String { (path as NSString).lastPathComponent }
 }
 
@@ -112,7 +114,7 @@ enum LibraryFiles {
                 guard values.isRegularFile == true, file.pathExtension.lowercased() == "exe" else { continue }
                 let relative = String(resolved.path.dropFirst(canonicalDrive.path.count + 1))
                 _ = try url(for: relative, drive: drive)
-                results.append(ExecutableChoice(path: relative))
+                results.append(ExecutableChoice(path: relative, machine: try? executableMachine(relative, drive: drive)))
             }
         }
 
@@ -191,12 +193,25 @@ enum LibraryFiles {
         }
     }
 
-    static func validateExecutable(_ path: String, drive: URL = LibraryFiles.drive) throws {
+    static func architectureLabel(_ machine: UInt16?) -> String {
+        switch machine {
+        case .some(0x014c): return "x86 · 32-bit"
+        case .some(0x8664): return "x64 · 64-bit"
+        case .some(0xaa64): return "ARM64 · 64-bit"
+        case .some(0xa641): return "ARM64EC · 64-bit"
+        case .some(0xa64e): return "ARM64X · 64-bit"
+        case .some(let value): return String(format: "Unknown architecture · 0x%04X", value)
+        case .none: return "Architecture unavailable"
+        }
+    }
+
+    /// Read the COFF Machine field from the selected file, never infer it from its name.
+    static func executableMachine(_ path: String, drive: URL = LibraryFiles.drive) throws -> UInt16? {
         let file = try url(for: path, drive: drive)
         guard FileManager.default.fileExists(atPath: file.path) else {
             throw LibraryError.message("The executable is missing. Choose another executable or import the game again.")
         }
-        if file.pathExtension.lowercased() == "msi" { return }
+        if file.pathExtension.lowercased() == "msi" { return nil }
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
         let header = try handle.read(upToCount: 64) ?? Data()
@@ -209,11 +224,15 @@ enum LibraryFiles {
         guard pe.count == 6, Array(pe.prefix(4)) == [0x50, 0x45, 0, 0] else {
             throw LibraryError.message("The Windows executable has an unreadable PE header.")
         }
-        let machine = UInt16(pe[4]) | UInt16(pe[5]) << 8
+        return UInt16(pe[4]) | (UInt16(pe[5]) << 8)
+    }
+
+    static func validateExecutable(_ path: String, drive: URL = LibraryFiles.drive) throws {
+        guard let machine = try executableMachine(path, drive: drive) else { return }
         guard [UInt16(0x8664), 0xaa64, 0xa641, 0xa64e].contains(machine) else {
             throw LibraryError.message(machine == 0x14c
-                ? "This is a 32-bit Windows executable. Madeira currently runs 64-bit apps. Choose the game's x64 executable or a 64-bit installer."
-                : "This executable's processor architecture is not supported by Madeira.")
+                ? "\((path as NSString).lastPathComponent) has an x86 (32-bit) entry point, PE machine 0x014C. This build cannot run native 32-bit apps or installers. A 32-bit installer may contain a 64-bit app, but the installer still needs a 32-bit runtime. If the game folder includes an x64 executable, choose it in Details."
+                : "\((path as NSString).lastPathComponent) uses \(architectureLabel(machine)), which this build does not support.")
         }
     }
 }

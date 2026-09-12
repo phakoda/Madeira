@@ -38,6 +38,11 @@ assert 'MADEIRA_LAUNCH_CWD' in bridge and 'MADEIRA_LAUNCH_CWD' in session
 assert 'setenv("SteamAppId",  "356400"' not in bridge, 'A fixed game ID would contaminate unrelated launches'
 assert session.index('try ready.validate()') < session.index('madeira_seed_prefix_if_needed')
 assert session.index('StikJITHelper.allocatePool') < session.index('wineserver_start(prefix)') < session.index('wine_process_start(prefix)')
+resources = project.split('/* Begin PBXResourcesBuildPhase section */')[1].split('/* End PBXResourcesBuildPhase section */')[0]
+assert resources.count('/* madeira-jit.js in Resources */') == 1, 'The current JIT script must ship in the IPA'
+assert 'StikJITRequest.url(bundleID: bundleId, scriptBase64: resolvedScriptBase64)' in (APP / 'StikJITHelper.swift').read_text()
+assert 'JITControlView(session: session)' in (APP / 'LibraryView.swift').read_text()
+assert 'JITControlView(session: session)' in (APP / 'EmulatorSessionView.swift').read_text()
 workflow = (ROOT / '.github/workflows/build-ipa.yml').read_text()
 assert 'bash tests/run-library-tests.sh' in workflow
 subprocess.run(['git', 'diff', '--check'], cwd=ROOT, check=True)

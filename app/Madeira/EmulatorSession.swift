@@ -7,6 +7,8 @@ final class EmulatorSession: ObservableObject {
         case idle, preparing, needsJIT, enablingJIT, starting, running, finished(Int32), failed(String)
     }
 
+    enum JITAction: Equatable { case idle, waiting, enabled, failed(String) }
+    @Published private(set) var jitAction: JITAction = .idle
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var title = "Windows desktop"
     @Published private(set) var libraryID: UUID?
@@ -16,8 +18,12 @@ final class EmulatorSession: ObservableObject {
     /// The native Wine/FEX globals are process-lifetime. Do not reinitialize them after exit.
     private var hasStarted = false
     private var generation = UUID()
+    private var jitRequest = UUID()
     var isActive: Bool { [.preparing, .needsJIT, .enablingJIT, .starting, .running].contains(phase) }
-    var canLaunch: Bool { !isActive && !hasStarted }
+    var canLaunch: Bool { !isActive && !hasStarted && jitAction != .waiting }
+    var canEnableJIT: Bool {
+        !hasStarted && phase != .preparing && phase != .enablingJIT && jitAction != .waiting
+    }
     var status: String {
         switch phase {
         case .idle: return "Ready when you are"
@@ -59,20 +65,47 @@ final class EmulatorSession: ObservableObject {
         }
     }
 
+    func refreshJITStatus() {
+        guard !hasStarted, jitAction != .waiting else { return }
+        if jit_check_debugged() { jitAction = .enabled }
+        else if jitAction == .enabled { jitAction = .idle }
+    }
+
+    /// Standalone action: open StikDebug and run the script without starting Wine.
+    func enableJITFromLibrary() {
+        guard canEnableJIT else { return }
+        requestJIT(continueLaunch: phase == .needsJIT)
+    }
+
     func enableJIT() {
         guard phase == .needsJIT else { return }
         if jit_check_debugged() { start(); return }
+        requestJIT(continueLaunch: true)
+    }
+
+    private func requestJIT(continueLaunch: Bool) {
         guard StikJITHelper.isAvailable else {
-            phase = .failed("Install and set up StikDebug, then launch this item again to enable JIT.")
+            let message = "StikDebug could not be opened. Install and set it up on this device, then tap Enable JIT again."
+            jitAction = .failed(message)
+            if continueLaunch { phase = .failed(message) }
             return
         }
-        phase = .enablingJIT
-        let request = generation
+        jitRequest = UUID()
+        let request = jitRequest
+        jitAction = .waiting
+        if continueLaunch { phase = .enablingJIT }
+        jit_install_trap_handler()
         StikJITHelper.enableJIT { [weak self] success in
             Task { @MainActor in
-                guard let self, self.generation == request, self.phase == .enablingJIT else { return }
-                if success { self.start() }
-                else { self.phase = .failed("JIT was not enabled. Open StikDebug, check its pairing setup, then try again.") }
+                guard let self, self.jitRequest == request else { return }
+                if success {
+                    self.jitAction = .enabled
+                    if continueLaunch && self.phase == .enablingJIT { self.start() }
+                } else {
+                    let message = "JIT was not enabled. Check StikDebug's pairing setup, then tap Enable JIT to retry."
+                    self.jitAction = .failed(message)
+                    if continueLaunch { self.phase = .failed(message) }
+                }
             }
         }
     }
@@ -81,6 +114,8 @@ final class EmulatorSession: ObservableObject {
         // Copying/seeding and native startup cannot be safely interrupted halfway through.
         guard phase == .needsJIT || phase == .enablingJIT else { return }
         generation = UUID()
+        jitRequest = UUID()
+        jitAction = .idle
         plan = nil
         phase = .idle
         presented = false

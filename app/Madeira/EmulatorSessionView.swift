@@ -152,6 +152,44 @@ struct EmulatorSessionView: View {
 }
 
 @MainActor
+struct JITControlView: View {
+    @ObservedObject var session: EmulatorSession
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 14) {
+                Button { session.enableJITFromLibrary() } label: {
+                    Label("Enable JIT", systemImage: "bolt.fill")
+                        .font(.subheadline.weight(.semibold)).frame(minHeight: 36)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!session.canEnableJIT)
+                .accessibilityHint("Opens StikDebug and runs Madeira's JIT script.")
+                if session.jitAction == .waiting {
+                    ProgressView()
+                } else if session.jitAction == .enabled {
+                    Label("Enabled", systemImage: "checkmark.circle.fill")
+                        .font(.caption).foregroundStyle(MadeiraStyle.accent)
+                }
+                Spacer(minLength: 0)
+            }
+            if case .failed(let message) = session.jitAction {
+                Text(message).font(.caption).foregroundStyle(.orange)
+            } else {
+                Text(session.jitAction == .waiting
+                    ? "Complete the request in StikDebug, then return to Madeira."
+                    : "Opens StikDebug with Madeira's JIT script.")
+                    .font(.caption).foregroundStyle(MadeiraStyle.secondary)
+            }
+        }
+        .onAppear { session.refreshJITStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            session.refreshJITStatus()
+        }
+    }
+}
+
+@MainActor
 struct MadeiraSettingsView: View {
     @ObservedObject var session: EmulatorSession
     @ObservedObject private var input = InputSettings.shared
@@ -172,6 +210,10 @@ struct MadeiraSettingsView: View {
                 Button(session.canLaunch ? "Open Windows desktop" : "View current session") {
                     if session.canLaunch { session.launch(nil) } else { session.presented = true }
                 }.frame(minHeight: 44)
+                .disabled(session.jitAction == .waiting)
+            }
+            Section("JIT") {
+                JITControlView(session: session)
             }
             Section("Display") {
                 Toggle("Show frame rate", isOn: $showFPS)

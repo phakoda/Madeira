@@ -65,6 +65,7 @@ struct ContentView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 28) {
                         masthead
+                        JITControlView(session: session)
                         if session.phase != .idle { sessionBanner }
                         if library.items.isEmpty { welcome }
                         else {
@@ -185,6 +186,10 @@ struct ContentView: View {
     private func launch(_ item: LibraryItem) {
         if session.canLaunch { session.launch(item) }
         else {
+            if session.jitAction == .waiting {
+                notice = "Return from StikDebug after enabling JIT, then launch the app."
+                return
+            }
             notice = session.isActive
                 ? "A Windows session is already open. Resume it from the library before starting another app."
                 : "Close and reopen Madeira to start another session. Your library and installed files are saved."

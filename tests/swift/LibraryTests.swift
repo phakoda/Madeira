@@ -48,6 +48,18 @@ struct LibraryTests {
         try expect(fm.fileExists(atPath: temp.appendingPathComponent("My Game/game.dll").path), "Import moved original files")
         let choices = try LibraryFiles.executables(in: imported.directory, drive: drive)
         try expect(choices.count == 2, "Nested and uppercase executable discovery failed")
+        try expect(choices.first { $0.name == "Game.EXE" }?.machine == 0x8664, "x64 game was misidentified")
+        try expect(choices.first { $0.name == "Launcher.exe" }?.machine == 0x014c, "x86 launcher was misidentified")
+        // Filenames are not architecture evidence.
+        _ = try write("Source/LooksLike32bit.exe", data: pe(0x8664))
+        let named32 = try LibraryFiles.importFile(temp.appendingPathComponent("Source/LooksLike32bit.exe"), as: .game, drive: drive)
+        try LibraryFiles.validateExecutable(named32.executable!, drive: drive)
+        _ = try write("Source/LooksLike64bit.exe", data: pe(0x014c))
+        let named64 = try LibraryFiles.importFile(temp.appendingPathComponent("Source/LooksLike64bit.exe"), as: .game, drive: drive)
+        try expectFailure("A misleading x64 filename bypassed the x86 restriction") {
+            try LibraryFiles.validateExecutable(named64.executable!, drive: drive)
+        }
+
         var game = imported
         game.executable = imported.directory + "/bin/Game.EXE"
         game.arguments = ["-dx11", "a path with spaces", "日本語"]
@@ -120,6 +132,16 @@ struct LibraryTests {
         let brokenStore = LibraryStore(manifestURL: manifest)
         brokenStore.remove(game)
         try expect(try Data(contentsOf: manifest) == corrupt, "Corrupt manifest was overwritten")
-        print("Library tests passed: imports, rollback, paths, PE validation, launch plans and persistence")
+        // '+' must survive decoders that interpret it as a query-space character.
+        let script = "+/8="
+        guard let jitURL = StikJITRequest.url(bundleID: "com.example.madeira", scriptBase64: script),
+              let components = URLComponents(url: jitURL, resolvingAgainstBaseURL: false) else {
+            throw TestFailure(description: "JIT URL could not be built")
+        }
+        try expect(jitURL.scheme == "stikjit" && jitURL.host == "enable-jit", "Wrong StikDebug action")
+        try expect(components.queryItems?.first { $0.name == "script-data" }?.value == script, "JIT script was corrupted")
+        try expect(components.queryItems?.first { $0.name == "bundle-id" }?.value == "com.example.madeira", "Wrong JIT target")
+        try expect(components.percentEncodedQuery?.contains("+") == false, "Base64 '+' was left ambiguous")
+        print("Library tests passed: imports, paths, PE architecture, launch plans, persistence and StikDebug URL")
     }
 }

@@ -70,6 +70,8 @@
 		A1000303 /* LibraryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000303 /* LibraryDetailView.swift */; };
 		A1000304 /* EmulatorSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000304 /* EmulatorSessionView.swift */; };
 		A1000305 /* LaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000305 /* LaunchPlan.swift */; };
+		A1000306 /* StikJITRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000306 /* StikJITRequest.swift */; };
+		A1000307 /* madeira-jit.js in Resources */ = {isa = PBXBuildFile; fileRef = A2000307 /* madeira-jit.js */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -147,6 +149,8 @@
 		A2000303 /* LibraryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryDetailView.swift; sourceTree = "<group>"; };
 		A2000304 /* EmulatorSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorSessionView.swift; sourceTree = "<group>"; };
 		A2000305 /* LaunchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchPlan.swift; sourceTree = "<group>"; };
+		A2000306 /* StikJITRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StikJITRequest.swift; sourceTree = "<group>"; };
+		A2000307 /* madeira-jit.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "madeira-jit.js"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -197,6 +201,8 @@
 			children = (
 				A2000001 /* MadeiraApp.swift */,
 				A2000002 /* ContentView.swift */,
+				A2000306 /* StikJITRequest.swift */,
+				A2000307 /* madeira-jit.js */,
 				A2000305 /* LaunchPlan.swift */,
 				A2000304 /* EmulatorSessionView.swift */,
 				A2000303 /* LibraryDetailView.swift */,
@@ -351,6 +357,7 @@
 				A1000080 /* arm64ec-windows in Resources */,
 				A1000081 /* x86_64-vcruntime in Resources */,
 				A1000040 /* prefix-template.tar.gz in Resources */,
+				A1000307 /* madeira-jit.js in Resources */,
 				A1000094 /* cacert.pem in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -364,6 +371,7 @@
 			files = (
 				A1000001 /* MadeiraApp.swift in Sources */,
 				A1000002 /* ContentView.swift in Sources */,
+				A1000306 /* StikJITRequest.swift in Sources */,
 				A1000305 /* LaunchPlan.swift in Sources */,
 				A1000304 /* EmulatorSessionView.swift in Sources */,
 				A1000303 /* LibraryDetailView.swift in Sources */,
