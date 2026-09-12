@@ -39,4 +39,5 @@ jobs:
           path: |
             build/mesa-ios/out/${{ matrix.sdk }}/
             build/mesa-ios/.work/${{ matrix.sdk }}/build/meson-logs/
+            build/mesa-ios/.work/${{ matrix.sdk }}/link-commands.txt
             /tmp/mesa-build.log

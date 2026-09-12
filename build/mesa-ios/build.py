@@ -197,7 +197,16 @@ def main():
     # Keep response files so packaging can expand exactly what the linker read.
     run(["ninja", "-C", build, "-d", "keeprsp", target])
     commands = capture(["ninja", "-C", build, "-t", "commands", target]).splitlines()
-    link_commands = [line for line in commands if "-dynamiclib" in shlex.split(line)]
+    (work / "link-commands.txt").write_text("\n".join(commands) + "\n")
+    # Meson's Darwin linker uses -shared, which clang translates to a dylib.
+    # Select the actual output target instead of relying on a driver spelling.
+    link_commands = []
+    for line in commands:
+        tokens = expand_responses(shlex.split(line), build)
+        for index, token in enumerate(tokens[:-1]):
+            if token == '-o' and Path(tokens[index + 1]).as_posix() == target:
+                link_commands.append(line)
+                break
     if len(link_commands) != 1:
         raise RuntimeError("Expected one OSMesa dynamic link after static dependency builds")
     inputs = archive_inputs(link_commands[0], build)
