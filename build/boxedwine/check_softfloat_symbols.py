@@ -13,7 +13,10 @@ def main():
     args = parser.parse_args()
     if sys.platform == 'darwin':
         output = subprocess.check_output(['xcrun', 'nm', '-gjU', args.archive], text=True)
-        symbols = {line.removeprefix('_') for line in output.splitlines()}
+        # Apple nm also prints archive member headings even with -j. Those
+        # filenames end in ':' and are not linker symbols.
+        symbols = {line.removeprefix('_') for line in output.splitlines()
+                   if re.fullmatch(r'_[A-Za-z_][A-Za-z_0-9]*', line)}
     else:
         output = subprocess.check_output(['nm', '-g', '--defined-only', '--format=posix', args.archive], text=True)
         symbols = {line.split()[0] for line in output.splitlines() if line.split()}
