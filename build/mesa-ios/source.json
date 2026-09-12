@@ -1,0 +1,64 @@
+{
+  "version": "25.0.7",
+  "url": "https://archive.mesa3d.org/mesa-25.0.7.tar.xz",
+  "sha256": "592272df3cf01e85e7db300c449df5061092574d099da275d19e97ef0510f8a6",
+  "directory": "mesa-25.0.7",
+  "python_packages": {
+    "meson": "1.7.2",
+    "ninja": "1.11.1.4",
+    "Mako": "1.3.9",
+    "MarkupSafe": "3.0.2",
+    "packaging": "24.2",
+    "PyYAML": "6.0.2"
+  },
+  "python_wheels": [
+    {
+      "package": "meson",
+      "filename": "meson-1.7.2-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/e5/2b/46bda4ef5a7ae4135dbfe27fc0368c44e5a349a897a54fdf2cedb8dcb66e/meson-1.7.2-py3-none-any.whl",
+      "sha256": "82c6818dc81743c96de3a458f06175776ebfde4081195ea31ea6971838f25e38"
+    },
+    {
+      "package": "ninja",
+      "filename": "ninja-1.11.1.4-py3-none-macosx_10_9_universal2.whl",
+      "url": "https://files.pythonhosted.org/packages/4f/b1/3a61b348936b62a386465b1937cd778fa3a5748582e26d832dbab844ff27/ninja-1.11.1.4-py3-none-macosx_10_9_universal2.whl",
+      "sha256": "b33923c8da88e8da20b6053e38deb433f53656441614207e01d283ad02c5e8e7"
+    },
+    {
+      "package": "Mako",
+      "filename": "Mako-1.3.9-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/cd/83/de0a49e7de540513f53ab5d2e105321dedeb08a8f5850f0208decf4390ec/Mako-1.3.9-py3-none-any.whl",
+      "sha256": "95920acccb578427a9aa38e37a186b1e43156c87260d7ba18ca63aa4c7cbd3a1"
+    },
+    {
+      "package": "MarkupSafe",
+      "filename": "MarkupSafe-3.0.2-cp312-cp312-macosx_10_13_universal2.whl",
+      "url": "https://files.pythonhosted.org/packages/22/09/d1f21434c97fc42f09d290cbb6350d44eb12f09cc62c9476effdb33a18aa/MarkupSafe-3.0.2-cp312-cp312-macosx_10_13_universal2.whl",
+      "sha256": "9778bd8ab0a994ebf6f84c2b949e65736d5575320a17ae8984a77fab08db94cf"
+    },
+    {
+      "package": "MarkupSafe",
+      "filename": "MarkupSafe-3.0.2-cp312-cp312-macosx_11_0_arm64.whl",
+      "url": "https://files.pythonhosted.org/packages/6b/b0/18f76bba336fa5aecf79d45dcd6c806c280ec44538b3c13671d49099fdd0/MarkupSafe-3.0.2-cp312-cp312-macosx_11_0_arm64.whl",
+      "sha256": "846ade7b71e3536c4e56b386c2a47adf5741d2d8b94ec9dc3e92e5e1ee1e2225"
+    },
+    {
+      "package": "packaging",
+      "filename": "packaging-24.2-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/88/ef/eb23f262cca3c0c4eb7ab1933c3b1f03d021f2c48f54763065b6f0e321be/packaging-24.2-py3-none-any.whl",
+      "sha256": "09abb1bccd265c01f4a3aa3f7a7db064b36514d2cba19a2f694fe6150451a759"
+    },
+    {
+      "package": "PyYAML",
+      "filename": "PyYAML-6.0.2-cp312-cp312-macosx_10_9_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/86/0c/c581167fc46d6d6d7ddcfb8c843a4de25bdd27e4466938109ca68492292c/PyYAML-6.0.2-cp312-cp312-macosx_10_9_x86_64.whl",
+      "sha256": "c70c95198c015b85feafc136515252a261a84561b7b1d51e3384e0655ddf25ab"
+    },
+    {
+      "package": "PyYAML",
+      "filename": "PyYAML-6.0.2-cp312-cp312-macosx_11_0_arm64.whl",
+      "url": "https://files.pythonhosted.org/packages/a8/0c/38374f5bb272c051e2a69281d71cba6fdb983413e6758b84482905e29a5d/PyYAML-6.0.2-cp312-cp312-macosx_11_0_arm64.whl",
+      "sha256": "ce826d6ef20b1bc864f0a68340c8b3287705cae2f8b4b1d932177dcc76721725"
+    }
+  ]
+}

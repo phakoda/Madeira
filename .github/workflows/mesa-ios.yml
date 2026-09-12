@@ -1,0 +1,42 @@
+name: iOS software OpenGL
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'build/mesa-ios/**'
+      - '.github/workflows/mesa-ios.yml'
+
+permissions:
+  contents: read
+
+env:
+  GIT_CONFIG_COUNT: '1'
+  GIT_CONFIG_KEY_0: http.userAgent
+  GIT_CONFIG_VALUE_0: 'OpenAI File Downloader, XaiImageApiFetch/1.0'
+
+jobs:
+  osmesa:
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [iphoneos, iphonesimulator]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and link static software OpenGL for iOS
+        run: |
+          set -o pipefail
+          python3 build/mesa-ios/build.py --sdk '${{ matrix.sdk }}' --deployment-target 17.0 2>&1 | tee /tmp/mesa-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: osmesa-${{ matrix.sdk }}
+          path: |
+            build/mesa-ios/out/${{ matrix.sdk }}/
+            build/mesa-ios/.work/${{ matrix.sdk }}/build/meson-logs/
+            /tmp/mesa-build.log
