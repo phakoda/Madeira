@@ -46,10 +46,19 @@ int main(void) {
 
     HANDLE file = CreateFileW(L"D:\\32 bit result.txt", GENERIC_WRITE, 0, NULL,
                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE) return 21;
+    if (file == INVALID_HANDLE_VALUE) {
+        printf("probe: CreateFileW failed, Win32 error %lu, drive type %u\n",
+               GetLastError(), GetDriveTypeW(L"D:\\")); fflush(stdout);
+        return 21;
+    }
     const char result[] = "native-x86-wine-memory-threads-registry-file-ok\n";
     DWORD written;
-    if (!WriteFile(file, result, sizeof(result) - 1, &written, NULL) || written != sizeof(result) - 1) return 22;
+    if (!WriteFile(file, result, sizeof(result) - 1, &written, NULL) || written != sizeof(result) - 1) {
+        printf("probe: WriteFile failed, Win32 error %lu\n", GetLastError()); fflush(stdout);
+        CloseHandle(file);
+        return 22;
+    }
     CloseHandle(file);
+    puts("probe: persistent file written"); fflush(stdout);
     return 0;
 }

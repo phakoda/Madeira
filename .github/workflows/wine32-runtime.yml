@@ -56,6 +56,19 @@ jobs:
             --rootfs "$PWD/.wine32-cache/wine11.zip" --prefix /tmp/wine32-prefix --payload /tmp/wine32-probe \
             --name runtime --result '/tmp/wine32-probe/32 bit result.txt' \
             --expected native-x86-wine-memory-threads-registry-file-ok -- /bin/wine 'D:\probe.exe'
+      - name: Restart embedded guest in the same host process
+        env:
+          SDL_AUDIODRIVER: dummy
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          mkdir -p /tmp/wine32-lifecycle-prefix
+          xvfb-run -a timeout 60 /tmp/boxedwine-build/madeira-wine32 --host-repeat-twice \
+            -root /tmp/wine32-lifecycle-prefix -zip "$PWD/.wine32-cache/wine11.zip" \
+            -mount_drive /tmp/wine32-probe d -nosound /bin/sh -c 'echo restarted >> /mnt/drive_d/lifecycle.txt'
+          python3 - <<'PY'
+          from pathlib import Path
+          assert Path('/tmp/wine32-probe/lifecycle.txt').read_text().splitlines() == ['restarted', 'restarted']
+          PY
       - name: Install MSI and launch its installed executable
         env:
           SDL_AUDIODRIVER: dummy

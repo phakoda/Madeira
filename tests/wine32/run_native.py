@@ -73,6 +73,7 @@ def main():
         finally:
             if not success:
                 screenshot('failure')
+                print('Mounted payload files:', sorted(p.name for p in args.payload.iterdir()), flush=True)
             if process.poll() is None:
                 process.send_signal(signal.SIGINT)
                 try:
