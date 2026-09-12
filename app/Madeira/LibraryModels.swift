@@ -50,10 +50,15 @@ enum LibraryFiles {
             !$0.isEmpty && $0 != "." && $0 != ".." &&
             $0.rangeOfCharacter(from: CharacterSet(charactersIn: "\\:\"<>|?*").union(.controlCharacters)) == nil
         }) else { throw LibraryError.message("This library entry has an invalid file path.") }
+
         let root = drive.resolvingSymlinksInPath().standardizedFileURL
-        let result = root.appendingPathComponent(path).resolvingSymlinksInPath().standardizedFileURL
-        guard result.path.hasPrefix(root.path + "/") else {
-            throw LibraryError.message("This file is outside the Windows drive.")
+        var result = root
+        for component in components {
+            result = result.appendingPathComponent(String(component))
+                .resolvingSymlinksInPath().standardizedFileURL
+            guard result.path.hasPrefix(root.path + "/") else {
+                throw LibraryError.message("This file is outside the Windows drive.")
+            }
         }
         return result
     }
