@@ -40,6 +40,11 @@ bool StartUpArgs::begin() {
     sessionInitialized = true;
     KSystem::init(this->disableLinearMemory);''')
     text = replace(text, '    std::vector<std::shared_ptr<FsZip>> openZips;\n', '')
+    text = replace(text, '    for(auto&& info: this->mountInfo) {', '''    FsFileNode::writableMountPaths.clear();
+    for(auto&& info: this->mountInfo) {''')
+    text = replace(text, '        if (info.wine) {\n', '''        if (info.wine) {
+            FsFileNode::writableMountPaths.push_back(info.getFullLocalPath());
+''')
     text = replace(text, '''        if (result) {
             if (!doMainLoop()) {
                 return false; // doMainLoop should have handled any cleanup, like SDL_Quit if necessary
@@ -65,6 +70,26 @@ bool StartUpArgs::loadDefaultResource''', '''    openZips.clear();
 }
 
 bool StartUpArgs::loadDefaultResource''')
+    updates[path] = text
+    path = root / 'source/io/fsfilenode.h'
+    text = replace(path.read_text(), '    static std::set<BString> nonExecFileFullPaths;',
+                   '''    static std::set<BString> nonExecFileFullPaths;
+    static std::vector<BString> writableMountPaths;''')
+    updates[path] = text
+    path = root / 'source/io/fsfilenode.cpp'
+    text = replace(path.read_text(), 'std::set<BString> FsFileNode::nonExecFileFullPaths;',
+                   '''std::set<BString> FsFileNode::nonExecFileFullPaths;
+std::vector<BString> FsFileNode::writableMountPaths;''')
+    text = replace(text, '    bool isAutomationFilesPath = this->path == "/files" ||',
+                   '''    bool isWritableMount = false;
+    for (const auto& mount : writableMountPaths) {
+        if (this->path == mount || this->path.startsWith(mount + "/")) {
+            isWritableMount = true;
+            break;
+        }
+    }
+    bool isAutomationFilesPath = this->path == "/files" ||''')
+    text = replace(text, '        isAutomationFilesPath) {', '        isAutomationFilesPath || isWritableMount) {')
     updates[path] = text
     path = root / 'platform/sdl/knativesystem.cpp'
     text = path.read_text()

@@ -70,7 +70,12 @@ extern "C" int madeira_wine32_start(int argc, const char** argv) {
         }
         session->disableLinearMemory = true;
         KSystem::startMicroCounter();
-        KSystem::exePath = Fs::getNativeParentPath(BString::copy(argv[0]));
+        // Fs::nativePathSeperator is initialized by begin(). Before that,
+        // upstream's native parent-path helper dereferences an empty BString.
+        std::string executablePath = argv[0];
+        const auto separator = executablePath.find_last_of("/\\");
+        executablePath = separator == std::string::npos ? "" : executablePath.substr(0, separator + 1);
+        KSystem::exePath = BString::copy(executablePath.c_str());
         Platform::init();
         SDL_SetMainReady();
         platformInitialized = true;
