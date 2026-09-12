@@ -13,6 +13,8 @@ final class EmulatorSession: ObservableObject {
     @Published private(set) var title = "Windows desktop"
     @Published private(set) var libraryID: UUID?
     @Published var presented = false
+    @Published private(set) var runtime: WindowsRuntime = .native64
+    private let wine32 = Wine32Session()
     private var plan: LaunchPlan?
     private var monitor: Timer?
     /// The native Wine/FEX globals are process-lifetime. Do not reinitialize them after exit.
@@ -50,19 +52,37 @@ final class EmulatorSession: ObservableObject {
                 let ready = try await Task.detached(priority: .userInitiated) {
                     let ready = try item.map { try LaunchPlan.make(item: $0) } ?? .windowsDesktop
                     try ready.validate()
-                    guard madeira_seed_prefix_if_needed(LibraryFiles.prefix.path) == 0 else {
+                    guard ready.runtime == .wine32 || madeira_seed_prefix_if_needed(LibraryFiles.prefix.path) == 0 else {
                         throw LibraryError.message("Windows could not be prepared. Check available storage and that the IPA includes its Windows runtime. Your imported files have been kept.")
                     }
                     return ready
                 }.value
                 guard generation == request else { return }
                 plan = ready
-                if jit_check_debugged() { start() } else { phase = .needsJIT }
+                runtime = ready.runtime
+                if ready.runtime == .wine32 { startWine32(ready) }
+                else if jit_check_debugged() { start() } else { phase = .needsJIT }
             } catch {
                 guard generation == request else { return }
                 phase = .failed(error.localizedDescription)
             }
         }
+    }
+
+    private func startWine32(_ plan: LaunchPlan) {
+        phase = .starting
+        do {
+            try wine32.start(plan) { [weak self] error in
+                guard let self else { return }
+                self.phase = error.map(Phase.failed) ?? .finished(0)
+            }
+            phase = .running
+        } catch { phase = .failed(error.localizedDescription) }
+    }
+
+    func stopWine32() {
+        guard runtime == .wine32, phase == .running else { return }
+        wine32.stop()
     }
 
     func refreshJITStatus() {

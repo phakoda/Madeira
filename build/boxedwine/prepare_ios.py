@@ -11,6 +11,19 @@ def prepare(root):
     text = path.read_text()
     text = replace(text, '#ifndef __MACH__\nint getPixelFormats',
                    '#if !defined(__MACH__) || defined(MADEIRA_IOS)\nint getPixelFormats')
+    # The interpreter never writes executable host code. Apple's device SDK
+    # does not provide the GCC clear-cache helper used by the Linux platform.
+    # Keep those calls only for upstream's other targets, and reject accidental
+    # native-JIT configuration of this iOS adapter.
+    text = replace(text, '#include "boxedwine.h"', '''#include "boxedwine.h"
+#if defined(MADEIRA_IOS) && defined(BOXEDWINE_JIT)
+#error Madeira iOS backend requires the interpreter
+#endif''')
+    for call in ('__builtin___clear_cache((char*)address, (char*)address+len);',
+                 '__builtin___clear_cache((char*)address, (char*)address + len);',
+                 '__builtin___clear_cache((char*)address, ((char*)address) + len);'):
+        text = replace(text, '    ' + call,
+            '#ifndef MADEIRA_IOS\n    ' + call + '\n#endif')
     updates[path] = text
     path = root / 'platform/linux/platformOpenGL.cpp'
     text = path.read_text()

@@ -1,0 +1,35 @@
+name: Library and runtime routing
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'app/Madeira/*.swift'
+      - 'app/Madeira/*.h'
+      - 'app/Madeira.xcodeproj/**'
+      - 'tests/swift/LibraryTests.swift'
+      - 'tests/run-library-tests.sh'
+      - '.github/workflows/library.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  library:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify imports, architecture routing and persistent libraries
+        run: |
+          python3 tests/check-library-source.py
+          bash tests/run-library-tests.sh
+      - name: Type-check the complete iOS Swift UI and runtime bridge
+        run: |
+          set -euo pipefail
+          NEWEST="$(ls -d /Applications/Xcode_2*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -n "$NEWEST" ]; then export DEVELOPER_DIR="$NEWEST/Contents/Developer"; fi
+          xcrun swiftc -typecheck -parse-as-library -swift-version 5 \
+            -target arm64-apple-ios17.0 -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -import-objc-header app/Madeira/Madeira-Bridging-Header.h \
+            app/Madeira/*.swift

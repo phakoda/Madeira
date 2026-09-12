@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: mesa-ios-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   GIT_CONFIG_COUNT: '1'
@@ -88,6 +88,11 @@ jobs:
             -DOSMESA_ROOT="$PWD/build/mesa-ios/out/${{ matrix.sdk }}" 2>&1 | tee /tmp/wine32-ios-configure.log
           cmake --build /tmp/boxedwine-ios --parallel 3 2>&1 | tee /tmp/wine32-ios-build.log
           xcrun vtool -show-build /tmp/boxedwine-ios/madeira-wine32-ios-link
+      - name: Verify production runtime packaging
+        run: |
+          python3 build/boxedwine/package_ios.py --build /tmp/boxedwine-ios \
+            --source /tmp/boxedwine-source --mesa 'build/mesa-ios/out/${{ matrix.sdk }}' \
+            --wine /tmp/wine11.zip --graphics /tmp/graphics/madeira-graphics.zip --app /tmp/packaged-wine32
       - name: Run Windows installers and Direct3D through the UIKit host
         if: matrix.sdk == 'iphonesimulator'
         run: |

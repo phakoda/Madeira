@@ -11,6 +11,8 @@ extern "C" {
 // guest, so returning to the library does not discard the running session.
 void madeira_wine32_set_view_host(UIViewController* parent);
 void madeira_wine32_show_keyboard(void);
+// SDL/USB HID scancode, used by the session toolbar.
+void madeira_wine32_key(int scancode, int down);
 
 #ifdef __cplusplus
 }

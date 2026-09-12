@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: wine32-runtime-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   GIT_CONFIG_COUNT: '1'

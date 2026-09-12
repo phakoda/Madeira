@@ -6,6 +6,7 @@ struct EmulatorSessionView: View {
     @ObservedObject private var input = InputSettings.shared
     @Environment(\.verticalSizeClass) private var verticalSize
     @AppStorage("session.showFPS") private var showFPS = false
+    @State private var confirmStop = false
 
     private var showsDisplay: Bool { session.phase == .running || session.phase == .starting }
     var body: some View {
@@ -20,7 +21,7 @@ struct EmulatorSessionView: View {
                             keyboardButton
                             pointerButton
                             closeWindowButton
-                            if showFPS { FPSOverlay(compact: true) }
+                            if showFPS && session.runtime == .native64 { FPSOverlay(compact: true) }
                         }
                         .padding(.vertical, 12).frame(width: 100)
                         .background(MadeiraStyle.background)
@@ -45,15 +46,21 @@ struct EmulatorSessionView: View {
                         }
                         HStack(spacing: 18) {
                             keyboardButton
-                            HoldKeyView(label: "Esc", vk: 0x1B)
-                            HoldKeyView(label: "Tab", vk: 0x09)
-                            HoldKeyView(label: "↵", vk: 0x0D)
+                            if session.runtime == .wine32 {
+                                interpreterKey("Esc", scancode: 41)
+                                interpreterKey("Tab", scancode: 43)
+                                interpreterKey("↵", scancode: 40)
+                            } else {
+                                HoldKeyView(label: "Esc", vk: 0x1B)
+                                HoldKeyView(label: "Tab", vk: 0x09)
+                                HoldKeyView(label: "↵", vk: 0x0D)
+                            }
                             Spacer(minLength: 0)
                             pointerButton
                             closeWindowButton
                         }
                         .padding(16)
-                        if showFPS { FPSOverlay().padding(.horizontal, 16) }
+                        if showFPS && session.runtime == .native64 { FPSOverlay().padding(.horizontal, 16) }
                     }
                 }
             } else { sessionMessage }
@@ -62,6 +69,11 @@ struct EmulatorSessionView: View {
         .tint(MadeiraStyle.accent)
         .preferredColorScheme(.dark)
         .interactiveDismissDisabled()
+        .confirmationDialog("End the 32-bit Windows session?", isPresented: $confirmStop, titleVisibility: .visible) {
+            Button("End session", role: .destructive) { session.stopWine32() }
+        } message: {
+            Text("Exit the game or installer first to save your work. Ending the session closes every 32-bit Windows app.")
+        }
         .onDisappear {
             MetalBackedView.keyboardTarget?.resignFirstResponder()
             GuestInput.shared.releaseAll()
@@ -71,20 +83,34 @@ struct EmulatorSessionView: View {
         }
     }
 
-    private var display: some View {
-        MadeiraMetalView()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.black)
-            .onAppear {
-                JoystickPadState.shared.hidden = false
-                TouchControlsHost.attach()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
-                TouchControlsHost.attach()
-            }
-            .onDisappear { TouchControlsHost.hide() }
-            .accessibilityLabel("Windows display")
-            .accessibilityHint("Use touch as a trackpad. Tap to click, two-finger tap to right-click.")
+    @ViewBuilder private var display: some View {
+        if session.runtime == .wine32 {
+            Wine32Display()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.black)
+                .accessibilityLabel("32-bit Windows display")
+                .accessibilityHint("Tap the Windows display to click. Use the keyboard button to type.")
+        } else {
+            MadeiraMetalView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.black)
+                .onAppear {
+                    JoystickPadState.shared.hidden = false
+                    TouchControlsHost.attach()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+                    TouchControlsHost.attach()
+                }
+                .onDisappear { TouchControlsHost.hide() }
+                .accessibilityLabel("Windows display")
+                .accessibilityHint("Use touch as a trackpad. Tap to click, two-finger tap to right-click.")
+        }
+    }
+    private func interpreterKey(_ label: String, scancode: Int32) -> some View {
+        Button(label) {
+            madeira_wine32_key(scancode, 1)
+            madeira_wine32_key(scancode, 0)
+        }.frame(minWidth: 44, minHeight: 44)
     }
     private var libraryButton: some View {
         Button { session.presented = false } label: {
@@ -92,27 +118,38 @@ struct EmulatorSessionView: View {
         }
     }
     private var keyboardButton: some View {
-        Button { MetalBackedView.toggleKeyboard() } label: {
+        Button {
+            if session.runtime == .wine32 { madeira_wine32_show_keyboard() }
+            else { MetalBackedView.toggleKeyboard() }
+        } label: {
             Image(systemName: "keyboard").font(.title3).frame(minWidth: 44, minHeight: 44)
         }.accessibilityLabel("Show or hide keyboard")
     }
-    private var pointerButton: some View {
-        Button { input.relative.toggle() } label: {
-            Image(systemName: input.relative ? "scope" : "cursorarrow.motionlines")
-                .font(.title3).frame(minWidth: 44, minHeight: 44)
+    @ViewBuilder private var pointerButton: some View {
+        if session.runtime == .native64 {
+            Button { input.relative.toggle() } label: {
+                Image(systemName: input.relative ? "scope" : "cursorarrow.motionlines")
+                    .font(.title3).frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel(input.relative ? "Switch to trackpad pointer" : "Switch to mouse look")
         }
-        .accessibilityLabel(input.relative ? "Switch to trackpad pointer" : "Switch to mouse look")
     }
-    private var closeWindowButton: some View {
-        Button {
-            let source = UUID()
-            GuestInput.shared.state.set(.key(0x12), down: true, source: source)
-            GuestInput.shared.state.set(.key(0x73), down: true, source: source)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { GuestInput.shared.state.release(source: source) }
-        } label: {
-            Image(systemName: "xmark.rectangle").font(.title3).frame(minWidth: 44, minHeight: 44)
+    @ViewBuilder private var closeWindowButton: some View {
+        if session.runtime == .wine32 {
+            Button { confirmStop = true } label: {
+                Image(systemName: "stop.circle").font(.title3).frame(minWidth: 44, minHeight: 44)
+            }.accessibilityLabel("End Windows session")
+        } else {
+            Button {
+                let source = UUID()
+                GuestInput.shared.state.set(.key(0x12), down: true, source: source)
+                GuestInput.shared.state.set(.key(0x73), down: true, source: source)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { GuestInput.shared.state.release(source: source) }
+            } label: {
+                Image(systemName: "xmark.rectangle").font(.title3).frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("Close the current Windows window")
         }
-        .accessibilityLabel("Close the current Windows window")
     }
 
     private var sessionMessage: some View {
@@ -138,7 +175,9 @@ struct EmulatorSessionView: View {
                         Button("Cancel launch") { session.cancelPreparation() }.frame(minHeight: 44)
                     case .failed(let message): Text(message)
                     case .finished:
-                        Text("Your files and installed apps are saved. To add an installed app, return to the library and select Find installed apps. Close and reopen Madeira before starting another Windows session.")
+                        Text(session.runtime == .wine32
+                            ? "Return to the library to start another game. Use Find installed apps to add programs you installed in Windows."
+                            : "Your files and installed apps are saved. To add an installed app, return to the library and select Find installed apps. Close and reopen Madeira before starting another Windows session.")
                     case .idle: Text("Choose a game or installer from your library to get started.")
                     case .running: EmptyView()
                     }
@@ -263,7 +302,7 @@ struct MadeiraHelpView: View {
     var body: some View {
         List {
             Section("Bring a game") {
-                Text("Use Add to library → Import game folder to copy an extracted Windows game, including its DLLs and data. If the folder has several executables, choose the game's main 64-bit .exe in Details.")
+                Text("Use Add to library → Import game folder to copy an extracted Windows game, including its DLLs and data. If the folder has several executables, choose the game's main .exe in Details.")
             }
             Section("Install an app") {
                 Text("Use Open an installer to import an .exe or .msi, then tap Run installer. Complete the Windows setup wizard using the trackpad and keyboard controls.")
@@ -271,11 +310,11 @@ struct MadeiraHelpView: View {
             }
             Section("Before you play") {
                 Text("Set up StikDebug on your device. Madeira will ask to enable JIT when a session needs it. The signed app also needs the memory and virtual-address entitlements expected by this emulator.")
-                Text("The engine currently runs 64-bit Windows apps. A 32-bit launcher or installer can prevent an otherwise compatible game from starting. Try the game's 64-bit executable when one is available.")
+                Text("32-bit EXEs run through an interpreter with translated guest memory and software graphics. They do not require JIT. Speed and game compatibility vary. For MSI packages, select the required 32-bit or 64-bit runtime in Details.")
             }
             Section("Sessions and files") {
                 Text("The Library button returns to your collection while Windows continues running. Use the session banner to resume. Close Windows apps using their own exit controls or the Close window button.")
-                Text("After a Windows session ends, close and reopen Madeira before starting another. The current engine cannot reset all of its process state in place.")
+                Text("32-bit sessions can be ended and restarted from the library. After a 64-bit session ends, close and reopen Madeira before starting another session.")
                 Text("Removing a library item only removes its shortcut. Game files and saves stay in Madeira's Windows drive and are accessible through the Files app.")
             }
         }

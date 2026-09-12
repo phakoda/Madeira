@@ -12,7 +12,23 @@ env:
   CACHE_V: "1"
 
 jobs:
+  wine32-graphics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the pinned x86 guest graphics bridge
+        run: |
+          sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' update
+          sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' install -y gcc-multilib libgl-dev libglu1-mesa-dev
+          python3 build/boxedwine/fetch.py --cache /tmp/boxedwine-cache --source /tmp/boxedwine-source
+          python3 build/boxedwine/build_guest_graphics.py --source /tmp/boxedwine-source --output /tmp/graphics/madeira-graphics.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wine32-guest-graphics
+          path: /tmp/graphics/
   build:
+    needs: wine32-graphics
     runs-on: macos-15
     timeout-minutes: 350
 
@@ -58,6 +74,30 @@ jobs:
         run: |
           xcodebuild -downloadComponent MetalToolchain \
             || echo "downloadComponent unsupported; assuming bundled"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: wine32-guest-graphics
+          path: /tmp/graphics
+      - name: Build and package the 32-bit interpreter and software graphics
+        run: |
+          set -euo pipefail
+          python3 build/mesa-ios/build.py --sdk iphoneos --deployment-target 17.0
+          export PATH="$PWD/build/mesa-ios/.work/iphoneos/python/bin:$PATH"
+          python3 build/boxedwine/fetch.py --cache /tmp/boxedwine-cache --source /tmp/boxedwine-source --wine /tmp/wine11.zip
+          cmake -S build/boxedwine -B /tmp/boxedwine-ios -G Ninja \
+            -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DBOXEDWINE_SOURCE=/tmp/boxedwine-source \
+            -DOSMESA_ROOT="$PWD/build/mesa-ios/out/iphoneos"
+          cmake --build /tmp/boxedwine-ios --parallel 3
+          python3 build/boxedwine/package_ios.py --build /tmp/boxedwine-ios \
+            --source /tmp/boxedwine-source --mesa build/mesa-ios/out/iphoneos \
+            --wine /tmp/wine11.zip --graphics /tmp/graphics/madeira-graphics.zip --app app/Madeira
 
       - name: Cache vcruntime
         id: vcr

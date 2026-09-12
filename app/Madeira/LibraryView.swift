@@ -441,7 +441,8 @@ struct LibraryArtwork: View {
             artwork = nil
             guard let item else { return }
             let thumbnail = await Task.detached(priority: .utility) { () -> CGImage? in
-                guard let directory = try? LibraryFiles.directoryURL(item.directory) else { return nil }
+                guard let directory = try? LibraryFiles.directoryURL(item.directory,
+                    drive: LibraryFiles.drive(for: item.resolvedVolume)) else { return nil }
                 for name in ["cover.jpg", "cover.png", "folder.jpg", "folder.png"] {
                     let file = directory.appendingPathComponent(name)
                     guard let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { continue }

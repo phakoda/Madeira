@@ -1,6 +1,6 @@
 # Native 32-bit Windows support
 
-Native x86 support is not implemented in the current Madeira IPA. It cannot be enabled by changing the executable validator or FEX's mode setting alone.
+This branch adds an x86 interpreter with guest memory translation and a full Wine32 filesystem. The app routing and IPA packaging are implemented in source. See [backend architecture and validation status](WINE32_BACKEND.md) for current execution evidence. The previously built IPA does not acquire this runtime until rebuilt.
 
 ## Files checked
 
@@ -20,7 +20,7 @@ The local port has matching constraints:
 - `build/ntdll-unix/virtual_ios.c` starts its address space above 4 GB and moves TEB and shared-user-data allocations above the reserved region for iOS.
 - `app/Madeira/FEXBridge.mm` configures the embedded translator for 64-bit execution.
 - `scripts/build-prefix-snapshot.sh` removes `windows/syswow64` from the prefix.
-- The IPA's current build and packaging paths do not provide a complete i386 Wine runtime and iOS-compatible WOW64 bridge.
+- The original native64 packaging lacks an i386 Wine runtime. The new backend packages a separate complete Wine32 guest filesystem.
 
 No linker changes to remove page zero, architecture-check bypass, or unsupported mode toggle were added.
 
@@ -28,13 +28,13 @@ No linker changes to remove page zero, architecture-check bypass, or unsupported
 
 `app/Madeira/GuestMemory32.h` and `GuestMemory32.cpp` now implement a process-owned sparse guest memory service. It reserves 32-bit address ranges, commits zeroed backing on demand, translates checked reads/writes/instruction fetches, enforces 4 KiB software permissions, and provides serialized compare/exchange and scoped native access. See [the memory service contract and integration status](GUEST_MEMORY_TRANSLATION.md).
 
-This is an implemented memory component, not an enabled Wine/FEX backend. The current executable launch restriction remains. Neither SteamSetup.exe nor a native x86 game can run through this service yet.
+The standalone service remains separate from the original Wine/FEX backend. The app's new x86 route uses BoxedWine's existing software MMU throughout instruction execution and emulated system calls. It does not reinterpret native host pointers as 32-bit guest addresses.
 
 A software memory translation layer is a possible engineering route. It must keep 32-bit guest addresses separate from their host backing addresses throughout instruction execution, memory allocation, PE loading, Wine API pointer conversion, callbacks, exceptions, thread state, and shared memory. Translating CPU instructions alone does not satisfy those requirements.
 
 The other architectural option is a full-system x86 emulator with a separate Windows installation. That would be a separate backend rather than enabling the current Wine/FEX integration.
 
-Working support needs a native x86 test program and a real 32-bit installer to execute on the target iOS device, with file I/O, process creation, callbacks, and graphics checked. This update does not claim those capabilities.
+The native Linux CI suite has executed a real x86 test program, installed it through an MSI, relaunched the installed copy, and verified a Direct3D render target. iOS execution and device game compatibility require separate validation, tracked in the backend notes.
 
 ## JIT control
 

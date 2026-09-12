@@ -62,6 +62,16 @@ extern "C" void madeira_wine32_show_keyboard(void) {
     else SDL_StartTextInput();
 }
 
+extern "C" void madeira_wine32_key(int scancode, int down) {
+    if (scancode <= SDL_SCANCODE_UNKNOWN || scancode >= SDL_NUM_SCANCODES) return;
+    SDL_Event event = {};
+    event.type = down ? SDL_KEYDOWN : SDL_KEYUP;
+    event.key.state = down ? SDL_PRESSED : SDL_RELEASED;
+    event.key.keysym.scancode = static_cast<SDL_Scancode>(scancode);
+    event.key.keysym.sym = SDL_GetKeyFromScancode(event.key.keysym.scancode);
+    SDL_PushEvent(&event);
+}
+
 // The upstream POSIX platform delegates these three hooks to macOS. The iOS
 // host supplies resource lookup and owns all file-picker/navigation UI.
 extern "C" void MacPlatormSetThreadPriority(void) {}

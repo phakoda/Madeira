@@ -56,9 +56,9 @@ struct LibraryTests {
         try LibraryFiles.validateExecutable(named32.executable!, drive: drive)
         _ = try write("Source/LooksLike64bit.exe", data: pe(0x014c))
         let named64 = try LibraryFiles.importFile(temp.appendingPathComponent("Source/LooksLike64bit.exe"), as: .game, drive: drive)
-        try expectFailure("A misleading x64 filename bypassed the x86 restriction") {
-            try LibraryFiles.validateExecutable(named64.executable!, drive: drive)
-        }
+        let named64Plan = try LaunchPlan.make(item: named64, drive: drive)
+        try expect(named64Plan.runtime == .wine32, "A misleading filename selected the wrong runtime")
+        try expect(named64Plan.executable.hasPrefix("D:\\"), "Imported x86 executable must use the shared D drive")
 
         var game = imported
         game.executable = imported.directory + "/bin/Game.EXE"
@@ -72,8 +72,23 @@ struct LibraryTests {
         try expect(!plan.desktop, "Games must launch directly")
         let json = try JSONEncoder().encode(plan.arguments)
         try expect(try JSONDecoder().decode([String].self, from: json) == plan.arguments, "JSON argv changed Unicode or spaces")
-        try expectFailure("32-bit executable was accepted") {
-            try LibraryFiles.validateExecutable(imported.directory + "/bin/Launcher.exe", drive: drive)
+        try expect(plan.runtime == .native64, "x64 executable selected the interpreter")
+        var x86Game = game
+        x86Game.executable = imported.directory + "/bin/Launcher.exe"
+        let x86Plan = try LaunchPlan.make(item: x86Game, drive: drive)
+        try expect(x86Plan.runtime == .wine32, "Native x86 must select guest memory translation")
+        try expect(x86Plan.guestWorkingDirectory == "/mnt/drive_d/" + imported.directory + "/bin", "Imported game working directory is wrong")
+        let hostArguments = x86Plan.wine32Arguments(rootfs: temp.appendingPathComponent("wine.zip"),
+            graphics: temp.appendingPathComponent("graphics.zip"), root: temp, sharedDrive: drive)
+        try expect(hostArguments[4].hasSuffix("graphics.zip") && hostArguments[6].hasSuffix("wine.zip"), "Guest graphics overlay must take precedence over the old Wine GL bridge")
+        try expect(Array(hostArguments.suffix(game.arguments.count)) == game.arguments, "Interpreter launch changed argument boundaries")
+        x86Game.volume = .wine32
+        let installed32Plan = try LaunchPlan.make(item: x86Game, drive: drive)
+        try expect(installed32Plan.executable.hasPrefix("C:\\"), "Installed x86 app must use Wine32 C drive")
+        try expect(installed32Plan.guestWorkingDirectory?.hasPrefix("/home/username/.wine/drive_c/") == true, "Installed app working directory is wrong")
+        x86Game.executable = game.executable
+        try expectFailure("64-bit executable in a Wine32 installation was accepted") {
+            _ = try LaunchPlan.make(item: x86Game, drive: drive)
         }
         _ = try write("broken.exe", data: Data("not a PE".utf8), root: drive)
         try expectFailure("Invalid PE was accepted") { try LibraryFiles.validateExecutable("broken.exe", drive: drive) }
@@ -94,6 +109,11 @@ struct LibraryTests {
         let installer = try LibraryFiles.importFile(msi, as: .installer, drive: drive)
         let installPlan = try LaunchPlan.make(item: installer, drive: drive)
         try expect(installPlan.desktop, "Installer needs the Windows desktop")
+        try expect(installPlan.runtime == .wine32, "New MSI imports default to the 32-bit installer runtime")
+        var msi64 = installer
+        msi64.installerRuntime = .native64
+        let msi64Plan = try LaunchPlan.make(item: msi64, drive: drive)
+        try expect(msi64Plan.runtime == .native64 && msi64Plan.arguments[3].hasPrefix("C:\\"), "Explicit 64-bit MSI selection was ignored")
         try expect(installPlan.arguments[1] == "C:\\windows\\system32\\msiexec.exe", "MSI did not select msiexec")
         try expect(installPlan.arguments[2] == "/i", "MSI did not request installation")
         try expect(installPlan.arguments[3].hasSuffix("My Setup 日本語.msi"), "MSI path lost spaces or Unicode")
@@ -127,6 +147,16 @@ struct LibraryTests {
         try expect(LibraryStore(manifestURL: manifest).items == [game], "Edits were not persisted")
         store.remove(game)
         try expect(store.items.isEmpty && fm.fileExists(atPath: copiedData.path), "Removing a shortcut removed game files")
+        // Legacy manifests omit the volume/runtime fields and retain their paths.
+        try expect(store.addInstalled(ExecutableChoice(path: "Program Files/App.exe", volume: .native64)) != nil, "Could not add native shortcut")
+        try expect(store.addInstalled(ExecutableChoice(path: "Program Files/App.exe", volume: .wine32)) != nil, "Could not add x86 shortcut")
+        try expect(store.items.count == 2, "Equal paths in separate Windows drives were collapsed")
+        try expect(LibraryStore(manifestURL: manifest).items.map(\.resolvedVolume) == [.native64, .wine32], "Drive selection was not persisted")
+        var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode([game])) as! [[String: Any]]
+        legacy[0].removeValue(forKey: "volume")
+        legacy[0].removeValue(forKey: "installerRuntime")
+        let legacyItems = try JSONDecoder().decode([LibraryItem].self, from: JSONSerialization.data(withJSONObject: legacy))
+        try expect(legacyItems[0].resolvedVolume == .native64, "Existing library paths changed drive")
         let corrupt = Data("broken manifest".utf8)
         try corrupt.write(to: manifest)
         let brokenStore = LibraryStore(manifestURL: manifest)

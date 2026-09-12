@@ -22,7 +22,7 @@ struct AddToLibraryView: View {
                         Label("Find installed apps", systemImage: "internaldrive")
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 14)
                     }
-                    Text("Use 64-bit Windows apps. Games that need additional files should be imported as a folder. Compatibility depends on the game and the Windows components it uses.")
+                    Text("Import games with their DLLs and data as a folder. Madeira selects the runtime from each executable's architecture. Compatibility depends on the game and the Windows components it uses.")
                         .font(.footnote).foregroundStyle(MadeiraStyle.secondary)
                 }
                 .padding(24)
@@ -111,6 +111,16 @@ struct LibraryDetailView: View {
                                 Text("Windows installer").tag(LibraryItem.Kind.installer)
                             }
                             .disabled(item.executable?.lowercased().hasSuffix(".msi") == true)
+                            if item.executable?.lowercased().hasSuffix(".msi") == true {
+                                Picker("Installer runtime", selection: Binding(get: { item.installerRuntime ?? .native64 }, set: { runtime in
+                                    var updated = item; updated.installerRuntime = runtime; library.update(updated)
+                                })) {
+                                    Text("32-bit Windows").tag(WindowsRuntime.wine32)
+                                    Text("64-bit Windows").tag(WindowsRuntime.native64)
+                                }
+                                Text("Choose the architecture required by the MSI package. Each runtime has its own installed apps and Windows files.")
+                                    .font(.caption).foregroundStyle(MadeiraStyle.secondary)
+                            }
                             Divider()
                             Text("Executable").font(.headline)
                             Text(architecture).font(.subheadline.weight(.medium)).foregroundStyle(MadeiraStyle.accent)
@@ -150,7 +160,7 @@ struct LibraryDetailView: View {
                     architecture = "Checking architecture…"
                     let result = await Task.detached(priority: .utility) { () -> String in
                         do {
-                            let machine = try LibraryFiles.executableMachine(path)
+                            let machine = try LibraryFiles.executableMachine(path, drive: LibraryFiles.drive(for: item.resolvedVolume))
                             return machine.map { LibraryFiles.architectureLabel($0) } ?? "MSI package · payload architecture varies"
                         } catch { return error.localizedDescription }
                     }.value
@@ -159,9 +169,10 @@ struct LibraryDetailView: View {
                 .onChange(of: name) { _, _ in showSaved = false }
                 .onChange(of: arguments) { _, _ in showSaved = false }
                 .sheet(isPresented: $chooseExecutable) {
-                    ExecutablePickerView(directory: item.directory) { choice in
+                    ExecutablePickerView(directory: item.directory, volume: item.resolvedVolume) { choice in
                         guard var updated = self.item else { return }
                         updated.executable = choice.path
+                        updated.volume = choice.volume
                         library.update(updated)
                         chooseExecutable = false
                     }
@@ -190,6 +201,7 @@ struct LibraryDetailView: View {
 
 struct ExecutablePickerView: View {
     var directory: String? = nil
+    var volume: LibraryVolume = .native64
     let choose: (ExecutableChoice) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var choices: [ExecutableChoice] = []
@@ -218,7 +230,11 @@ struct ExecutablePickerView: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 Label(choice.name, systemImage: "app.dashed").font(.headline)
                                 Text(choice.architectureLabel).font(.caption.weight(.semibold))
-                                    .foregroundStyle(choice.machine == 0x014c ? .orange : MadeiraStyle.accent)
+                                    .foregroundStyle(MadeiraStyle.accent)
+                                if directory == nil {
+                                    Text(choice.volume == .wine32 ? "32-bit Windows installation" : "64-bit Windows installation")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                                 Text(choice.path).font(.caption).foregroundStyle(.secondary)
                                     .lineLimit(3).multilineTextAlignment(.leading)
                             }
@@ -234,8 +250,14 @@ struct ExecutablePickerView: View {
             .task {
                 do {
                     let directory = directory
+                    let volume = volume
                     choices = try await Task.detached(priority: .userInitiated) {
-                        try LibraryFiles.executables(in: directory)
+                        if let directory {
+                            return try LibraryFiles.executables(in: directory, drive: LibraryFiles.drive(for: volume)).map {
+                                ExecutableChoice(path: $0.path, machine: $0.machine, volume: volume)
+                            }
+                        }
+                        return try LibraryFiles.installedExecutables()
                     }.value
                 } catch { self.error = error.localizedDescription }
                 loading = false

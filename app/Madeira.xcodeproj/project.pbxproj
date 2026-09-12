@@ -73,6 +73,9 @@
 		A1000305 /* LaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000305 /* LaunchPlan.swift */; };
 		A1000306 /* StikJITRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000306 /* StikJITRequest.swift */; };
 		A1000307 /* madeira-jit.js in Resources */ = {isa = PBXBuildFile; fileRef = A2000307 /* madeira-jit.js */; };
+		A1000320 /* Wine32Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000320 /* Wine32Session.swift */; };
+		A1000321 /* Wine32 in Resources */ = {isa = PBXBuildFile; fileRef = A2000321 /* Wine32 */; };
+		A1000322 /* libmadeira_wine32.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000322 /* libmadeira_wine32.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -154,6 +157,9 @@
 		A2000305 /* LaunchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchPlan.swift; sourceTree = "<group>"; };
 		A2000306 /* StikJITRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StikJITRequest.swift; sourceTree = "<group>"; };
 		A2000307 /* madeira-jit.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "madeira-jit.js"; sourceTree = "<group>"; };
+		A2000320 /* Wine32Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wine32Session.swift; sourceTree = "<group>"; };
+		A2000321 /* Wine32 */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Wine32; sourceTree = "<group>"; };
+		A2000322 /* libmadeira_wine32.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libmadeira_wine32.a; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -167,6 +173,7 @@
 				A1000013 /* libcephes_128bit.a in Frameworks */,
 				A1000014 /* libxxhash.a in Frameworks */,
 				A1000015 /* libsoftfloat_3e.a in Frameworks */,
+				A1000322 /* libmadeira_wine32.a in Frameworks */,
 				A1000016 /* libc++.tbd in Frameworks */,
 				A1000017 /* libJemallocLibs.a in Frameworks */,
 				A1000021 /* libwineserver.a in Frameworks */,
@@ -212,6 +219,9 @@
 				A2000302 /* LibraryView.swift */,
 				A2000301 /* EmulatorSession.swift */,
 				A2000300 /* LibraryModels.swift */,
+				A2000322 /* libmadeira_wine32.a */,
+				A2000321 /* Wine32 */,
+				A2000320 /* Wine32Session.swift */,
 				A2000003 /* LogStore.swift */,
 				A2000200 /* LogPattern.swift */,
 				A2000201 /* LogTail.swift */,
@@ -363,6 +373,7 @@
 				A1000081 /* x86_64-vcruntime in Resources */,
 				A1000040 /* prefix-template.tar.gz in Resources */,
 				A1000307 /* madeira-jit.js in Resources */,
+				A1000321 /* Wine32 in Resources */,
 				A1000094 /* cacert.pem in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -383,6 +394,7 @@
 				A1000302 /* LibraryView.swift in Sources */,
 				A1000301 /* EmulatorSession.swift in Sources */,
 				A1000300 /* LibraryModels.swift in Sources */,
+				A1000320 /* Wine32Session.swift in Sources */,
 				A1000003 /* LogStore.swift in Sources */,
 				A1000200 /* LogPattern.swift in Sources */,
 				A1000201 /* LogTail.swift in Sources */,
@@ -515,6 +527,7 @@
 					"$(SRCROOT)/../FEX/build-ios/External/SoftFloat-3e",
 					"$(SRCROOT)/Madeira",
 				);
+				OTHER_LDFLAGS = ("$(inherited)", "-framework", AudioToolbox, "-framework", AVFoundation, "-framework", CoreVideo, "-framework", CoreAudio, "-framework", CoreBluetooth, "-framework", CoreGraphics, "-framework", CoreMotion, "-framework", UIKit, "-liconv");
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.willfaust.mythicemu;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -566,6 +579,7 @@
 					"$(SRCROOT)/../FEX/build-ios/External/SoftFloat-3e",
 					"$(SRCROOT)/Madeira",
 				);
+				OTHER_LDFLAGS = ("$(inherited)", "-framework", AudioToolbox, "-framework", AVFoundation, "-framework", CoreVideo, "-framework", CoreAudio, "-framework", CoreBluetooth, "-framework", CoreGraphics, "-framework", CoreMotion, "-framework", UIKit, "-liconv");
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.willfaust.mythicemu;
 				PRODUCT_NAME = "$(TARGET_NAME)";

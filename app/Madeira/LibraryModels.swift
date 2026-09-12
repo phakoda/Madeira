@@ -1,13 +1,27 @@
 import Foundation
 import Combine
 
+enum LibraryVolume: String, Codable, Sendable {
+    case native64, wine32
+}
+
+enum WindowsRuntime: String, Codable, Sendable {
+    case native64, wine32
+}
+
 struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable { case game, installer }
 
     let id: UUID
     var name: String
     var kind: Kind
-    /// Paths are relative to drive_c, so app-container relocation is harmless.
+    /// Paths are relative to the selected drive_c. Missing volume preserves
+    /// libraries saved before the separate Wine32 prefix was introduced.
+    var volume: LibraryVolume? = nil
+    var resolvedVolume: LibraryVolume { volume ?? .native64 }
+    /// MSI packages have no PE entry point. The setup's required architecture
+    /// is selected in Details; existing entries keep their previous runtime.
+    var installerRuntime: WindowsRuntime? = nil
     var executable: String?
     var directory: String
     var addedAt: Date
@@ -25,7 +39,8 @@ struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
 struct ExecutableChoice: Identifiable, Sendable {
     let path: String
     var machine: UInt16? = nil
-    var id: String { path }
+    var volume: LibraryVolume = .native64
+    var id: String { volume.rawValue + ":" + path }
     var architectureLabel: String { LibraryFiles.architectureLabel(machine) }
     var name: String { (path as NSString).lastPathComponent }
 }
@@ -43,6 +58,13 @@ enum LibraryFiles {
     }
     static var prefix: URL { documents.appendingPathComponent("wine", isDirectory: true) }
     static var drive: URL { Self.prefix.appendingPathComponent("drive_c", isDirectory: true) }
+    static var wine32Root: URL { documents.appendingPathComponent("wine32", isDirectory: true) }
+    static var wine32Drive: URL {
+        wine32Root.appendingPathComponent("home/username/.wine/drive_c", isDirectory: true)
+    }
+    static func drive(for volume: LibraryVolume) -> URL {
+        volume == .wine32 ? wine32Drive : drive
+    }
     static var manifest: URL { documents.appendingPathComponent("madeira-library.json") }
 
     /// Validate persisted paths at the filesystem boundary, including symlink resolution.
@@ -121,6 +143,14 @@ enum LibraryFiles {
         return results.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 
+    static func installedExecutables() throws -> [ExecutableChoice] {
+        try [LibraryVolume.native64, .wine32].flatMap { volume in
+            try executables(drive: drive(for: volume)).map { choice in
+                ExecutableChoice(path: choice.path, machine: choice.machine, volume: volume)
+            }
+        }
+    }
+
     /// Copies the entire folder, including DLLs and data, while the provider grants access.
     /// A staging directory is published by rename only after the copy has completed.
     static func importFile(_ source: URL, as kind: LibraryItem.Kind, drive: URL = LibraryFiles.drive) throws -> LibraryItem {
@@ -186,7 +216,9 @@ enum LibraryFiles {
             published = true
             return LibraryItem(id: id,
                 name: isFolder ? filename : (filename as NSString).deletingPathExtension,
-                kind: isFolder ? .game : (filename.lowercased().hasSuffix(".msi") ? .installer : kind), executable: executable, directory: directory, addedAt: Date())
+                kind: isFolder ? .game : (filename.lowercased().hasSuffix(".msi") ? .installer : kind),
+                installerRuntime: filename.lowercased().hasSuffix(".msi") ? .wine32 : nil,
+                executable: executable, directory: directory, addedAt: Date())
         } catch {
             try? fm.removeItem(at: destination)
             throw error
@@ -229,10 +261,8 @@ enum LibraryFiles {
 
     static func validateExecutable(_ path: String, drive: URL = LibraryFiles.drive) throws {
         guard let machine = try executableMachine(path, drive: drive) else { return }
-        guard [UInt16(0x8664), 0xaa64, 0xa641, 0xa64e].contains(machine) else {
-            throw LibraryError.message(machine == 0x14c
-                ? "\((path as NSString).lastPathComponent) has an x86 (32-bit) entry point, PE machine 0x014C. This build cannot run native 32-bit apps or installers. A 32-bit installer may contain a 64-bit app, but the installer still needs a 32-bit runtime. If the game folder includes an x64 executable, choose it in Details."
-                : "\((path as NSString).lastPathComponent) uses \(architectureLabel(machine)), which this build does not support.")
+        guard [UInt16(0x014c), 0x8664, 0xaa64, 0xa641, 0xa64e].contains(machine) else {
+            throw LibraryError.message("\((path as NSString).lastPathComponent) uses \(architectureLabel(machine)), which this build does not support.")
         }
     }
 }
@@ -302,11 +332,11 @@ final class LibraryStore: ObservableObject {
     }
 
     func addInstalled(_ choice: ExecutableChoice) -> UUID? {
-        if let existing = items.first(where: { $0.executable == choice.path }) { return existing.id }
+        if let existing = items.first(where: { $0.executable == choice.path && $0.resolvedVolume == choice.volume }) { return existing.id }
         do {
-            _ = try LibraryFiles.windowsPath(choice.path)
+            _ = try LibraryFiles.windowsPath(choice.path, drive: LibraryFiles.drive(for: choice.volume))
             let item = LibraryItem(id: UUID(), name: (choice.name as NSString).deletingPathExtension,
-                kind: .game, executable: choice.path,
+                kind: .game, volume: choice.volume, executable: choice.path,
                 directory: (choice.path as NSString).deletingLastPathComponent, addedAt: Date())
             try save(items + [item])
             return item.id

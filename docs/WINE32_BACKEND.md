@@ -6,7 +6,7 @@ The active objective is working 32-bit EXE/MSI installation and game-folder exec
 
 The native [BoxedWine engine](https://github.com/danoon2/Boxedwine/tree/296ff0fa14e0dd1debb0f5898e2e33504f2ad066) provides an existing interpreter and software MMU used throughout x86 CPU execution and emulated Linux system calls. Running its full 32-bit Wine distribution keeps Wine's pointer-bearing structures inside the guest address space. It avoids having to marshal every WOW64/native-Wine structure in Madeira's current ARM64EC port.
 
-The selected initial mode is the native interpreter with sparse memory, selected by `-disableLinearMemory`. No native JIT configuration is enabled. The current 64-bit Wine/FEX backend remains available; 32-bit launch routing must be added once the new native engine is embedded.
+The selected initial mode is the native interpreter with sparse memory, selected by `-disableLinearMemory`. No native JIT configuration is enabled. `LaunchPlan` selects this backend for PE machine `0x014C`. The existing 64-bit Wine/FEX backend handles supported 64-bit machine values.
 
 The released browser build was considered and rejected. Its release notes explicitly exclude Direct3D and OpenGL. That would leave the requested game support incomplete. The native engine supports desktop OpenGL through an OSMesa adapter, which renders into its X11 drawable and then presents through SDL textures. The iOS route needs a real iOS build of software Mesa, not a browser-only substitute or a GLES flag standing in for desktop OpenGL.
 
@@ -28,18 +28,22 @@ The host execution job in [run 34723989701](https://github.com/phakoda/Madeira/a
 
 `build/mesa-ios` produces a pinned static Mesa 25.0.7 softpipe library with LLVM disabled. Both SDK variants passed archive architecture, symbol, executable-link, and Mach-O platform checks in [run 34723653929](https://github.com/phakoda/Madeira/actions/runs/34723653929). That establishes linkage, not rendered output.
 
-`prepare_ios.py` binds OSMesa statically and adapts SDL's UIKit presentation. `ios_view.h` attaches SDL's controller as a child of the host controller; SDL does not replace Madeira's application window. The iOS workflow also builds a small UIKit test app from `tests/wine32/ios`, with real x86 EXE/MSI fixtures and the complete Wine32 filesystem. Its Simulator run must produce guest-written results across runtime, installation, installed-EXE relaunch, and Direct3D stages. This execution check is not yet confirmed. The production app still needs backend packaging and launch routing.
+`prepare_ios.py` binds OSMesa statically and adapts SDL's UIKit presentation. `ios_view.h` attaches SDL's controller as a child of the host controller; SDL does not replace Madeira's application window. The iOS workflow also builds a small UIKit test app from `tests/wine32/ios`, with real x86 EXE/MSI fixtures and the complete Wine32 filesystem. Its Simulator run must produce guest-written results across runtime, installation, installed-EXE relaunch, and Direct3D stages. This execution check is not yet confirmed. Production packaging and launch routing are now implemented in source and await their CI results.
 
 The interpreter and UIKit test app linked for both SDKs in [run 34724559258](https://github.com/phakoda/Madeira/actions/runs/34724559258); a subsequent check used the wrong output path and prevented Simulator execution. The link fixture now explicitly builds as a plain executable. SDL's Metal shaders are regenerated for the selected SDK, because the pinned SDL has only a prebuilt device shader library. `namespace_softfloat.py` isolates BoxedWine's floating-point symbols from FEX's incompatible variants, and the compiled archive is checked for unprefixed exports before linkage.
 
-## Work required before completion
+## App integration
 
-- Build the native interpreter for iPhoneOS and Simulator, including UIKit-compatible platform code.
-- Embed startup, event pumping, cancellation, and shutdown without blocking UIKit or terminating the app.
-- Present SDL framebuffer output in the session view, with keyboard, pointer, touch, and audio routing.
-- Build and connect software OpenGL for the game's Direct3D path; verify a real x86 graphics program.
-- Bundle the full Wine32 runtime and its license/source notices, with a separate persistent prefix.
-- Route x86 executables and 32-bit MSI execution to this backend. Import and mounted-directory behavior must preserve complete game folders and installed output.
-- Verify installer execution, installed executable discovery, subsequent launch, persistence, callbacks, process creation, and graphics through the iOS runtime. Validate the supplied game on device without publishing the user's game files.
+`Wine32Session.swift` owns a bounded interpreter tick on the main run loop. `Wine32Display` embeds SDL's UIKit controller inside the session screen. Returning to the library detaches the view and keeps the guest running. The keyboard button uses SDL text input, and the toolbar sends Escape, Tab, and Enter. End session closes the interpreter after a confirmation. A later 32-bit session reuses the persistent filesystem.
 
-The goal remains active until those behaviors work. The current app's native32 restriction must not be removed merely because the host interpreter probe passes.
+Imported folders remain under `Documents/wine/drive_c/Madeira/Imports`. The 32-bit runtime mounts that drive as `D:`. Wine32 installs apps into its own `C:` under `Documents/wine32/home/username/.wine/drive_c`. Library entries retain their volume, and installed-app discovery scans both drives. Older manifests retain their original drive and MSI runtime.
+
+New MSI imports default to 32-bit Windows. Details includes an explicit installer-runtime choice because MSI files have no PE entry point. Selecting 64-bit Windows preserves the existing MSI launch path. EXE runtime selection always follows the actual PE header.
+
+`package_ios.py` combines the interpreter, isolated SoftFloat, SDL, and static OSMesa archives. It links a smoke executable against that final archive, then packages the full Wine ZIP, matching graphics overlay, provenance, and library notices. The manual **Build Madeira IPA** workflow builds the guest GL bridge on Linux and the native runtime on its macOS runner before Xcode builds the app.
+
+## Remaining validation
+
+The source changes do not establish game compatibility. The UIKit execution stages, complete Swift type check, and final runtime packaging must pass in GitHub Actions. Device acceptance must then cover touch coordinates, text input, rotation, returning to the library, audio, and the supplied game. The 32-bit display currently uses SDL input; Madeira's native64 controller-to-keyboard mapping and FPS counter do not measure or control this backend.
+
+The supplied game and Steam installer have not been executed on the user's device by this work. CPU interpretation and software graphics can be slow. A 32-bit installer that launches 64-bit components cannot run those components inside the x86 guest.
