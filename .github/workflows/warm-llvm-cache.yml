@@ -1,4 +1,4 @@
-name: Warm LLVM Cache
+name: Warm Native Build Caches
 
 on:
   workflow_dispatch:
@@ -8,10 +8,12 @@ permissions:
 
 env:
   IOS_DEPLOYMENT_TARGET: "17.0"
+  MINGW: llvm-mingw-20260421-ucrt-macos-universal
   CACHE_V: "1"
 
 jobs:
   llvm:
+    name: LLVM
     runs-on: macos-15
     timeout-minutes: 120
 
@@ -104,8 +106,6 @@ jobs:
             ! -name include -exec rm -rf {} +
           du -sh toolchains/llvm-ios-build toolchains/llvm-project
 
-      # Save NOW, not in a post-job hook. Once this step succeeds, a later
-      # workflow/DXMT failure cannot discard the completed LLVM build.
       - name: Save LLVM iOS cache immediately
         if: steps.llvm.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -123,3 +123,175 @@ jobs:
           test -d toolchains/llvm-ios-build/include
           ls toolchains/llvm-ios-build/lib/*.a >/dev/null
           echo "LLVM cache is ready: llvm-1507-ios-pruned-${CACHE_V}"
+
+  wine:
+    name: Wine
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: |
+          set -euxo pipefail
+          NEWEST="$(ls -d /Applications/Xcode_2*.app 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -n "$NEWEST" ]; then
+            SELECTED="$NEWEST/Contents/Developer"
+          else
+            FALLBACK="$(ls -d /Applications/Xcode_1*.app | sort -V | tail -1)"
+            SELECTED="$FALLBACK/Contents/Developer"
+          fi
+          export DEVELOPER_DIR="$SELECTED"
+          echo "DEVELOPER_DIR=$SELECTED" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$SELECTED"
+          xcodebuild -version
+
+      - name: Host Wine tools
+        run: |
+          set -euxo pipefail
+          brew install pkg-config bison flex
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+
+      - name: Restore llvm-mingw cache
+        id: tc
+        uses: actions/cache/restore@v4
+        with:
+          path: toolchains/llvm-mingw-20260421-ucrt-macos-universal
+          key: mingw-20260421-${{ env.CACHE_V }}
+
+      - name: Fetch llvm-mingw
+        if: steps.tc.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          mkdir -p toolchains
+          curl -fL "https://github.com/mstorsjo/llvm-mingw/releases/download/20260421/${MINGW}.tar.xz" \
+            | tar -xJ -C toolchains/
+          "toolchains/$MINGW/bin/aarch64-w64-mingw32-clang" --version
+
+      - name: Save llvm-mingw cache immediately
+        if: steps.tc.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: toolchains/llvm-mingw-20260421-ucrt-macos-universal
+          key: mingw-20260421-${{ env.CACHE_V }}
+
+      - name: Restore Wine build cache
+        id: winecache
+        uses: actions/cache/restore@v4
+        with:
+          path: wine/build-macos
+          key: wine-7817e22-${{ env.CACHE_V }}
+
+      - name: Build Wine PE libs and generated headers
+        if: steps.winecache.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          export PATH="$PWD/toolchains/$MINGW/bin:$PATH"
+          cd wine
+          rm -rf build-macos
+          mkdir -p build-macos && cd build-macos
+          ../configure --enable-win64 --disable-tests --without-x --without-freetype
+          test -f include/config.h
+          make -k -j"$(sysctl -n hw.ncpu)" 2>&1 | tail -40 || true
+          echo "=== host-side link failures are expected; PE side is what matters ==="
+
+      - name: Verify Wine outputs
+        run: |
+          set -euo pipefail
+          cd wine/build-macos
+          CRT0="$(find . -name 'libwinecrt0.a' -print -quit)"
+          if [ -z "$CRT0" ]; then
+            export PATH="$GITHUB_WORKSPACE/toolchains/$MINGW/bin:$PATH"
+            make -j"$(sysctl -n hw.ncpu)" dlls/winecrt0/aarch64-windows/libwinecrt0.a || true
+            CRT0="$(find . -name 'libwinecrt0.a' -print -quit)"
+          fi
+          test -n "$CRT0" || { echo "FATAL: no libwinecrt0.a"; exit 1; }
+          echo "found winecrt0: $CRT0"
+          ls include/dwrite*.h || {
+            export PATH="$GITHUB_WORKSPACE/toolchains/$MINGW/bin:$PATH"
+            make include/dwrite.h include/dwrite_1.h include/dwrite_2.h include/dwrite_3.h || true
+            ls include/dwrite*.h || { echo "FATAL: no dwrite headers"; exit 1; }
+          }
+
+      - name: Save Wine build cache immediately
+        if: steps.winecache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: wine/build-macos
+          key: wine-7817e22-${{ env.CACHE_V }}
+
+      - name: Confirm Wine cache
+        run: |
+          set -euxo pipefail
+          test -f wine/build-macos/include/config.h
+          find wine/build-macos -name libwinecrt0.a -print -quit | grep -q .
+          ls wine/build-macos/include/dwrite*.h >/dev/null
+          echo "Wine cache is ready: wine-7817e22-${CACHE_V}"
+
+  gnutls:
+    name: GnuTLS
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euxo pipefail
+          NEWEST="$(ls -d /Applications/Xcode_2*.app 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -n "$NEWEST" ]; then
+            SELECTED="$NEWEST/Contents/Developer"
+          else
+            FALLBACK="$(ls -d /Applications/Xcode_1*.app | sort -V | tail -1)"
+            SELECTED="$FALLBACK/Contents/Developer"
+          fi
+          export DEVELOPER_DIR="$SELECTED"
+          echo "DEVELOPER_DIR=$SELECTED" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$SELECTED"
+          xcodebuild -version
+
+      - name: Host GnuTLS tools
+        run: |
+          set -euxo pipefail
+          brew install pkg-config
+
+      - name: Restore GnuTLS stack cache
+        id: gnutls
+        uses: actions/cache/restore@v4
+        with:
+          path: toolchains/gnutls-ios
+          key: gnutls-6.3.0-3.10.1-3.8.9-${{ env.CACHE_V }}
+
+      - name: Build GnuTLS stack
+        if: steps.gnutls.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          rm -rf toolchains/gnutls-ios build/gnutls-ios/obj
+          bash build/gnutls-ios/build.sh
+          ls toolchains/gnutls-ios/lib/*.a
+
+      - name: Verify GnuTLS outputs
+        run: |
+          set -euxo pipefail
+          for lib in libgmp.a libnettle.a libhogweed.a libgnutls.a; do
+            test -f "toolchains/gnutls-ios/lib/$lib"
+            lipo -info "toolchains/gnutls-ios/lib/$lib"
+          done
+
+      - name: Save GnuTLS stack cache immediately
+        if: steps.gnutls.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: toolchains/gnutls-ios
+          key: gnutls-6.3.0-3.10.1-3.8.9-${{ env.CACHE_V }}
+
+      - name: Confirm GnuTLS cache
+        run: |
+          set -euxo pipefail
+          ls toolchains/gnutls-ios/lib/*.a >/dev/null
+          echo "GnuTLS cache is ready: gnutls-6.3.0-3.10.1-3.8.9-${CACHE_V}"
