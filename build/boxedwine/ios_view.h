@@ -10,6 +10,9 @@ extern "C" {
 // child and Metal view. Passing nil detaches presentation without stopping the
 // guest, so returning to the library does not discard the running session.
 void madeira_wine32_set_view_host(UIViewController* parent);
+// Detach only if this controller still owns presentation. SwiftUI can create
+// the replacement before dismantling the old view during rotation.
+void madeira_wine32_remove_view_host(UIViewController* parent);
 void madeira_wine32_show_keyboard(void);
 // SDL/USB HID scancode, used by the session toolbar.
 void madeira_wine32_key(int scancode, int down);

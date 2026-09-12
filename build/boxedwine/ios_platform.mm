@@ -40,6 +40,10 @@ extern "C" void madeira_wine32_set_view_host(UIViewController* parent) {
     attachGuest();
 }
 
+extern "C" void madeira_wine32_remove_view_host(UIViewController* parent) {
+    if (displayHost == parent) madeira_wine32_set_view_host(nil);
+}
+
 extern "C" void madeiraWine32SDLViewChanged(UIViewController* controller) {
     if (displayGuest != controller) detachGuest();
     displayGuest = controller;

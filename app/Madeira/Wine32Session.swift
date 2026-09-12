@@ -6,6 +6,7 @@ import QuartzCore
 final class Wine32Session: NSObject {
     private var clock: CADisplayLink?
     private var pumping = false
+    private var stopRequested = false
     private var completion: ((String?) -> Void)?
 
     func start(_ plan: LaunchPlan, completion: @escaping (String?) -> Void) throws {
@@ -30,6 +31,7 @@ final class Wine32Session: NSObject {
         }
         guard started != 0 else { throw LibraryError.message(Self.engineError) }
         self.completion = completion
+        stopRequested = false
         let clock = CADisplayLink(target: self, selector: #selector(tick))
         clock.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
         self.clock = clock
@@ -42,14 +44,22 @@ final class Wine32Session: NSObject {
         let result = madeira_wine32_tick()
         pumping = false
         if result < 0 { finish(error: Self.engineError) }
-        else if result == 0 { finish(error: nil) }
+        else if result == 0 || stopRequested { finish(error: nil) }
     }
 
-    func stop() { finish(error: nil) }
+    func stop() {
+        // SDL can pump UIKit events inside tick(). Finish only after that
+        // stack unwinds, so the library cannot start a new session too early.
+        if pumping {
+            stopRequested = true
+            madeira_wine32_stop()
+        } else { finish(error: nil) }
+    }
 
     private func finish(error: String?) {
         clock?.invalidate()
         clock = nil
+        stopRequested = false
         let stopped = madeira_wine32_stop()
         let callback = completion
         completion = nil
@@ -74,6 +84,6 @@ struct Wine32Display: UIViewControllerRepresentable {
         madeira_wine32_set_view_host(controller)
     }
     static func dismantleUIViewController(_ controller: UIViewController, coordinator: ()) {
-        madeira_wine32_set_view_host(nil)
+        madeira_wine32_remove_view_host(controller)
     }
 }
