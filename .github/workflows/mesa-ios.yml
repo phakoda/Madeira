@@ -30,12 +30,20 @@ jobs:
       - name: Compile native x86 Windows fixtures and MSI
         run: |
           sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' update
-          sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' install -y gcc-mingw-w64-i686 wixl
+          sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' install -y gcc-mingw-w64-i686 gcc-multilib libgl-dev libglu1-mesa-dev wixl
           mkdir -p /tmp/payload
           i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/runtime_probe.c -ladvapi32 -o /tmp/payload/probe.exe
           i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/graphics_probe.c -ld3d9 -luser32 -o /tmp/payload/graphics.exe
           cp tests/wine32/probe.wxs tests/wine32/install.cmd /tmp/payload/
           (cd /tmp/payload && wixl -a x86 -o probe.msi probe.wxs)
+      - name: Build matching i386 guest OpenGL bridge
+        run: |
+          python3 build/boxedwine/fetch.py --cache /tmp/boxedwine-cache --source /tmp/boxedwine-source
+          python3 build/boxedwine/build_guest_graphics.py --source /tmp/boxedwine-source --output /tmp/graphics/madeira-graphics.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wine32-guest-graphics
+          path: /tmp/graphics/
       - uses: actions/upload-artifact@v4
         with:
           name: x86-windows-fixtures
@@ -57,6 +65,10 @@ jobs:
         with:
           name: x86-windows-fixtures
           path: /tmp/payload
+      - uses: actions/download-artifact@v4
+        with:
+          name: wine32-guest-graphics
+          path: /tmp/graphics
       - name: Build and link static software OpenGL for iOS
         run: |
           set -o pipefail
@@ -72,6 +84,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DBOXEDWINE_SOURCE=/tmp/boxedwine-source \
             -DWINE32_PROBE_PAYLOAD=/tmp/payload -DWINE32_PROBE_ROOTFS=/tmp/wine11.zip \
+            -DWINE32_PROBE_GRAPHICS=/tmp/graphics/madeira-graphics.zip \
             -DOSMESA_ROOT="$PWD/build/mesa-ios/out/${{ matrix.sdk }}" 2>&1 | tee /tmp/wine32-ios-configure.log
           cmake --build /tmp/boxedwine-ios --parallel 3 2>&1 | tee /tmp/wine32-ios-build.log
           xcrun vtool -show-build /tmp/boxedwine-ios/madeira-wine32-ios-link

@@ -37,6 +37,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
   set(RENDER_METAL ON CACHE BOOL "" FORCE)
   add_subdirectory("${BW}/lib/sdl2" "${CMAKE_CURRENT_BINARY_DIR}/sdl2")
   target_compile_definitions(SDL2-static PRIVATE SDL_MAIN_HANDLED)
+  # This vendored SDL sets a C90 compatibility warning to error even in its
+  # Objective-C files. Mixed declarations are valid in the Apple language mode.
+  target_compile_options(SDL2-static PRIVATE -Wno-error=declaration-after-statement)
   set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ios_platform.mm"
     PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   add_library(madeira-osmesa STATIC IMPORTED)
@@ -115,11 +118,15 @@ if(MADEIRA_IOS)
   target_link_libraries(madeira-wine32-ios-link PRIVATE madeira-wine32-engine)
   set(WINE32_PROBE_PAYLOAD "" CACHE PATH "Directory of CI-built x86 Windows fixtures")
   set(WINE32_PROBE_ROOTFS "" CACHE FILEPATH "Complete pinned Wine32 ZIP for iOS execution tests")
+  set(WINE32_PROBE_GRAPHICS "" CACHE FILEPATH "Matching guest GL overlay ZIP")
   if(WINE32_PROBE_PAYLOAD AND WINE32_PROBE_ROOTFS)
+    if(NOT EXISTS "${WINE32_PROBE_GRAPHICS}")
+      message(FATAL_ERROR "The iOS probe requires the matching guest GL overlay")
+    endif()
     set(ios_probe "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/wine32/ios")
     add_executable(MadeiraWine32Probe MACOSX_BUNDLE "${ios_probe}/ProbeHost.mm"
-      "${WINE32_PROBE_PAYLOAD}" "${WINE32_PROBE_ROOTFS}")
-    set_source_files_properties("${WINE32_PROBE_PAYLOAD}" "${WINE32_PROBE_ROOTFS}"
+      "${WINE32_PROBE_PAYLOAD}" "${WINE32_PROBE_ROOTFS}" "${WINE32_PROBE_GRAPHICS}")
+    set_source_files_properties("${WINE32_PROBE_PAYLOAD}" "${WINE32_PROBE_ROOTFS}" "${WINE32_PROBE_GRAPHICS}"
       PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_target_properties(MadeiraWine32Probe PROPERTIES
       OBJCXX_STANDARD 20

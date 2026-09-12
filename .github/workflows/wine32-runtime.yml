@@ -30,13 +30,15 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' update
-          sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' install -y clang cmake ninja-build libsdl2-dev libgl-dev zlib1g-dev gcc-mingw-w64-i686 xvfb wixl imagemagick
+          sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' install -y clang cmake ninja-build libsdl2-dev libgl-dev zlib1g-dev gcc-mingw-w64-i686 gcc-multilib libglu1-mesa-dev xvfb wixl imagemagick
       - uses: actions/cache@v4
         with:
           path: .wine32-cache
           key: wine32-inputs-${{ hashFiles('build/boxedwine/runtime.json') }}
       - name: Fetch pinned source and complete Wine32 filesystem
         run: python3 build/boxedwine/fetch.py --cache .wine32-cache --source /tmp/boxedwine-source --wine .wine32-cache/wine11.zip
+      - name: Build matching guest OpenGL bridge
+        run: python3 build/boxedwine/build_guest_graphics.py --source /tmp/boxedwine-source --output /tmp/madeira-graphics.zip
       - name: Build native interpreter
         run: |
           cmake -S build/boxedwine -B /tmp/boxedwine-build -G Ninja \
@@ -58,7 +60,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: |
           xvfb-run -a python3 tests/wine32/run_native.py --engine /tmp/boxedwine-build/madeira-wine32 \
-            --rootfs "$PWD/.wine32-cache/wine11.zip" --prefix /tmp/wine32-prefix --payload /tmp/wine32-probe \
+            --rootfs "$PWD/.wine32-cache/wine11.zip" --graphics-rootfs /tmp/madeira-graphics.zip --prefix /tmp/wine32-prefix --payload /tmp/wine32-probe \
             --name runtime --result '/tmp/wine32-probe/32 bit result.txt' \
             --expected native-x86-wine-memory-threads-registry-file-ok -- /bin/wine 'D:\probe.exe'
       - name: Restart embedded guest in the same host process
@@ -68,7 +70,7 @@ jobs:
         run: |
           mkdir -p /tmp/wine32-lifecycle-prefix
           xvfb-run -a timeout 60 /tmp/boxedwine-build/madeira-wine32 --host-repeat-twice \
-            -root /tmp/wine32-lifecycle-prefix -zip "$PWD/.wine32-cache/wine11.zip" \
+            -root /tmp/wine32-lifecycle-prefix -zip /tmp/madeira-graphics.zip -zip "$PWD/.wine32-cache/wine11.zip" \
             -mount_drive /tmp/wine32-probe d -nosound /bin/sh -c 'echo restarted >> /mnt/drive_d/lifecycle.txt'
           python3 - <<'PY'
           from pathlib import Path
@@ -80,11 +82,11 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: |
           xvfb-run -a python3 tests/wine32/run_native.py --engine /tmp/boxedwine-build/madeira-wine32 \
-            --rootfs "$PWD/.wine32-cache/wine11.zip" --prefix /tmp/wine32-prefix --payload /tmp/wine32-probe \
+            --rootfs "$PWD/.wine32-cache/wine11.zip" --graphics-rootfs /tmp/madeira-graphics.zip --prefix /tmp/wine32-prefix --payload /tmp/wine32-probe \
             --name msi --result /tmp/wine32-probe/installer-result.txt --expected msi-installed-ok \
             -- /bin/wine cmd /c 'D:\install.cmd'
           xvfb-run -a python3 tests/wine32/run_native.py --engine /tmp/boxedwine-build/madeira-wine32 \
-            --rootfs "$PWD/.wine32-cache/wine11.zip" --prefix /tmp/wine32-prefix --payload /tmp/wine32-probe \
+            --rootfs "$PWD/.wine32-cache/wine11.zip" --graphics-rootfs /tmp/madeira-graphics.zip --prefix /tmp/wine32-prefix --payload /tmp/wine32-probe \
             --name installed --result '/tmp/wine32-probe/32 bit result.txt' \
             --expected native-x86-wine-memory-threads-registry-file-ok -- /bin/wine 'C:\Program Files\Madeira32Probe\probe.exe'
       - name: Verify x86 Direct3D 9 rendering and Windows callback
@@ -93,7 +95,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: |
           xvfb-run -a python3 tests/wine32/run_native.py --engine /tmp/boxedwine-build/madeira-wine32 \
-            --rootfs "$PWD/.wine32-cache/wine11.zip" --prefix /tmp/wine32-prefix --payload /tmp/wine32-probe \
+            --rootfs "$PWD/.wine32-cache/wine11.zip" --graphics-rootfs /tmp/madeira-graphics.zip --prefix /tmp/wine32-prefix --payload /tmp/wine32-probe \
             --name graphics --result '/tmp/wine32-probe/graphics result.txt' \
             --expected native-x86-d3d9-render-target-pixels-ok -- /bin/wine 'D:\graphics.exe'
       - uses: actions/upload-artifact@v4

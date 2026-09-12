@@ -11,6 +11,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--engine', type=Path, required=True)
     parser.add_argument('--rootfs', type=Path, required=True)
+    parser.add_argument('--graphics-rootfs', type=Path, required=True)
     parser.add_argument('--prefix', type=Path, required=True)
     parser.add_argument('--payload', type=Path, required=True)
     parser.add_argument('--result', type=Path, required=True)
@@ -24,7 +25,8 @@ def main():
         parser.error('A guest command is required after --')
     args.result.unlink(missing_ok=True)
     log = Path('/tmp') / f'wine32-{args.name}.log'
-    argv = [str(args.engine), '-root', str(args.prefix), '-zip', str(args.rootfs),
+    argv = [str(args.engine), '-root', str(args.prefix),
+            '-zip', str(args.graphics_rootfs), '-zip', str(args.rootfs),
             '-mount_drive', str(args.payload), 'd', '-disableLinearMemory', '-nosound',
             '-env', 'WINEDEBUG=-all,err+all',
             # These fixtures are native PE32 programs. Prefix initialization

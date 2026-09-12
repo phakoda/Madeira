@@ -67,8 +67,10 @@
         [self fail:error.localizedDescription]; return;
     }
     NSString* rootfs = [NSBundle.mainBundle pathForResource:@"wine11" ofType:@"zip"];
-    if (!rootfs) { [self fail:@"Missing full Wine32 filesystem"]; return; }
-    NSMutableArray<NSString*>* arguments = [@[@"madeira-wine32", @"-root", prefix.path, @"-zip", rootfs,
+    NSString* graphics = [NSBundle.mainBundle pathForResource:@"madeira-graphics" ofType:@"zip"];
+    if (!rootfs || !graphics) { [self fail:@"Missing Wine32 filesystem or guest graphics bridge"]; return; }
+    NSMutableArray<NSString*>* arguments = [@[@"madeira-wine32", @"-root", prefix.path,
+        @"-zip", graphics, @"-zip", rootfs,
         @"-mount_drive", self.payload.path, @"d", @"-opengl", @"osmesa", @"-nosound",
         @"-env", @"WINEDEBUG=-all,err+all", @"-env", @"WINEDLLOVERRIDES=mscoree,mshtml=", @"/bin/wine"] mutableCopy];
     [arguments addObjectsFromArray:stage[@"args"]];
