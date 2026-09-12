@@ -16,7 +16,6 @@ source "$REPO_ROOT/build/native-build-common.sh"
 madeira_begin_native_build
 OUT_LIB="$BUILD_DIR/libdxmt_unix.a"
 
-
 COMMON_FLAGS=("-arch" "arm64" "-isysroot" "$SDK" "-miphoneos-version-min=18.0" "-fblocks" "-O2")
 INCLUDES=("-I$DXMT_ROOT/include" "-I$DXMT_ROOT/libs" "-I$DXMT_SRC/winemetal" "-I$DXMT_SRC/airconv")
 INCLUDES_DIRECTX=("-I$DXMT_ROOT/include/native/directx" "-I$DXMT_ROOT/include/native/windows")
@@ -94,4 +93,14 @@ echo ""
 echo "=== Archiving libdxmt_unix.a ==="
 xcrun -sdk iphoneos ar rcs "$OBJ_DIR/libdxmt_unix.a" "$OBJ_DIR"/*.o
 madeira_publish_archive "$OBJ_DIR/libdxmt_unix.a" "$OUT_LIB"
+
+# The workflow's final libdxmt_combined.a merge consumes build/dxmt-ios/obj/*.o.
+# Keep compilation isolated so stale objects cannot affect a build, then publish
+# the complete successful object set atomically enough for the following CI step.
+PUBLISHED_OBJ_DIR="$BUILD_DIR/obj"
+rm -rf -- "$PUBLISHED_OBJ_DIR"
+mkdir -p "$PUBLISHED_OBJ_DIR"
+cp "$OBJ_DIR"/*.o "$PUBLISHED_OBJ_DIR"/
+
+echo "Published $(find "$PUBLISHED_OBJ_DIR" -maxdepth 1 -name '*.o' | wc -l | tr -d ' ') DXMT objects to $PUBLISHED_OBJ_DIR"
 echo "Built: $OUT_LIB ($(wc -c < "$OUT_LIB" | tr -d ' ') bytes)"
