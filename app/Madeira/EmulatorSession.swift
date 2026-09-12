@@ -24,7 +24,7 @@ final class EmulatorSession: ObservableObject {
     var isActive: Bool { [.preparing, .needsJIT, .enablingJIT, .starting, .running].contains(phase) }
     var canLaunch: Bool { !isActive && !hasStarted && jitAction != .waiting }
     var canEnableJIT: Bool {
-        !hasStarted && phase != .preparing && phase != .enablingJIT && jitAction != .waiting
+        !hasStarted && !(runtime == .wine32 && isActive) && phase != .preparing && phase != .enablingJIT && jitAction != .waiting
     }
     var status: String {
         switch phase {

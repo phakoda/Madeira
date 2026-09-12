@@ -2,7 +2,7 @@
 
 ## Status
 
-`app/Madeira/GuestMemory32.cpp` implements a sparse 32-bit guest address space with a C interface in `GuestMemory32.h`. The source is registered in the Xcode target and tested by a separate GitHub Actions workflow and the IPA workflow. **Wine and FEX do not yet consume this interface. Native 32-bit installers and games remain unsupported.**
+`app/Madeira/GuestMemory32.cpp` implements a sparse 32-bit guest address space with a C interface in `GuestMemory32.h`. The source is registered in the Xcode target and tested by a separate GitHub Actions workflow and the IPA workflow. Wine and FEX do not consume this standalone interface. The app now routes native x86 executables through BoxedWine's existing software MMU instead. See [the Wine32 backend and its execution evidence](WINE32_BACKEND.md).
 
 The implementation uses ordinary host heap allocations. On iOS these live outside the low 4 GiB reservation. Guest address `0x00400000` is a page-table key, never a native pointer. This does not change native address-space protections, JIT allocation, debugger behavior, entitlements, or the current x64 launch path.
 
@@ -84,4 +84,4 @@ Coverage includes overlapping reservations, automatic placement, range exhaustio
 
 The [GitHub Actions run for implementation commit `e214c14`](https://github.com/phakoda/Madeira/actions/runs/34716039114) passed on both Linux and macOS, including the sanitizer tests and separate C ABI caller. Local project-membership, plist, shell syntax, and whitespace checks also passed.
 
-No local compilation was performed. Host tests do not prove iOS integration or native x86 execution. Enabling native32 still requires device runs of a small x86 program, an installer, and the requested game through the completed Wine/FEX route.
+No local compilation was performed. These standalone memory tests do not prove iOS integration or native x86 execution. Separate Wine32 execution tests exercise the selected interpreter backend; their current results are recorded in the backend notes.
