@@ -12,10 +12,14 @@ SHIMS_DIR="$REPO_ROOT/build/ntdll-unix/shims"
 source "$REPO_ROOT/build/native-build-common.sh"
 madeira_begin_native_build
 
-# Copy the base library if we don't have one yet
+# Copy the base library if we don't have one yet. The CI full-build workflow
+# seeds a clean base archive under build/wineserver/obj before invoking this
+# patched rebuild, while normal local rebuilds may already have the app copy.
 if [ ! -f "$OBJ_DIR/libwineserver.a" ]; then
     if [ -f "$APP_LIB" ]; then
         cp "$APP_LIB" "$OBJ_DIR/libwineserver.a"
+    elif [ -f "$BUILD_DIR/obj/libwineserver.a" ]; then
+        cp "$BUILD_DIR/obj/libwineserver.a" "$OBJ_DIR/libwineserver.a"
     else
         echo "ERROR: No base libwineserver.a found"
         exit 1
