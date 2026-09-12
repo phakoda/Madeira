@@ -110,6 +110,7 @@ jobs:
             /tmp/wine32-ios-*.log
             /tmp/wine32-ios-*.json
             /tmp/wine32-ios-*.png
+            /tmp/wine32-ios-crash-*
             /tmp/boxedwine-ios/CMakeFiles/CMakeConfigureLog.yaml
             /tmp/boxedwine-ios/libmadeira-wine32-engine.a
             /tmp/boxedwine-ios/libbw_softfloat.a

@@ -69,6 +69,21 @@ def main():
             raise TimeoutError('iOS Wine32 execution exceeded the fixture deadline')
     finally:
         subprocess.run(['xcrun', 'simctl', 'io', device, 'screenshot', '/tmp/wine32-ios-final.png'], check=False)
+        with Path('/tmp/wine32-ios-system.log').open('w') as diagnostics:
+            try:
+                subprocess.run(['xcrun', 'simctl', 'spawn', device, 'log', 'show', '--style', 'compact',
+                    '--last', '5m', '--predicate',
+                    'process == "MadeiraWine32Probe" OR eventMessage CONTAINS "app.madeira.wine32probe"'],
+                    stdout=diagnostics, stderr=subprocess.STDOUT, timeout=20, check=False)
+            except subprocess.TimeoutExpired:
+                print('Simulator diagnostic log collection timed out', flush=True)
+        crash_roots = [Path.home() / 'Library/Logs/DiagnosticReports',
+            Path.home() / f'Library/Developer/CoreSimulator/Devices/{device}/data/Library/Logs/CrashReporter']
+        for root in crash_roots:
+            if root.exists():
+                for crash in root.glob('MadeiraWine32Probe*'):
+                    if crash.is_file():
+                        shutil.copyfile(crash, Path('/tmp') / ('wine32-ios-crash-' + crash.name))
         subprocess.run(['xcrun', 'simctl', 'terminate', device, 'app.madeira.wine32probe'], check=False)
         if process:
             try:
