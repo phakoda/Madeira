@@ -17,7 +17,9 @@ def main():
     else:
         output = subprocess.check_output(['nm', '-g', '--defined-only', '--format=posix', args.archive], text=True)
         symbols = {line.split()[0] for line in output.splitlines() if line.split()}
-    required = {'madeira_bw_extF80_to_f64', 'madeira_bw_softfloat_roundingMode', 'madeira_bw_f32_add'}
+    # BoxedWine builds the x87 subset, so f32_add is declared upstream but is
+    # deliberately absent from this archive. Check operations it actually uses.
+    required = {'madeira_bw_extF80_to_f64', 'madeira_bw_softfloat_roundingMode', 'madeira_bw_extF80_add'}
     if not required <= symbols:
         raise RuntimeError(f'Missing isolated SoftFloat exports: {sorted(required - symbols)}')
     families = re.compile(r'^(?:softfloat_|f(?:16|32|64|128)M?_|extF80M?_|(?:i|ui)(?:32|64)_to_)')
