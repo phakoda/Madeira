@@ -64,6 +64,12 @@
 		A100020C /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A200020C /* GameController.framework */; };
 		A100020D /* PointerMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200020D /* PointerMotion.swift */; };
 		A100020E /* PhysicalMouseBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200020E /* PhysicalMouseBridge.swift */; };
+		A1000300 /* LibraryModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000300 /* LibraryModels.swift */; };
+		A1000301 /* EmulatorSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000301 /* EmulatorSession.swift */; };
+		A1000302 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000302 /* LibraryView.swift */; };
+		A1000303 /* LibraryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000303 /* LibraryDetailView.swift */; };
+		A1000304 /* EmulatorSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000304 /* EmulatorSessionView.swift */; };
+		A1000305 /* LaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000305 /* LaunchPlan.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -135,6 +141,12 @@
 		A200020C /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		A200020D /* PointerMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PointerMotion.swift"; sourceTree = "<group>"; };
 		A200020E /* PhysicalMouseBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PhysicalMouseBridge.swift"; sourceTree = "<group>"; };
+		A2000300 /* LibraryModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryModels.swift; sourceTree = "<group>"; };
+		A2000301 /* EmulatorSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorSession.swift; sourceTree = "<group>"; };
+		A2000302 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		A2000303 /* LibraryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryDetailView.swift; sourceTree = "<group>"; };
+		A2000304 /* EmulatorSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorSessionView.swift; sourceTree = "<group>"; };
+		A2000305 /* LaunchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchPlan.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -185,6 +197,12 @@
 			children = (
 				A2000001 /* MadeiraApp.swift */,
 				A2000002 /* ContentView.swift */,
+				A2000305 /* LaunchPlan.swift */,
+				A2000304 /* EmulatorSessionView.swift */,
+				A2000303 /* LibraryDetailView.swift */,
+				A2000302 /* LibraryView.swift */,
+				A2000301 /* EmulatorSession.swift */,
+				A2000300 /* LibraryModels.swift */,
 				A2000003 /* LogStore.swift */,
 				A2000200 /* LogPattern.swift */,
 				A2000201 /* LogTail.swift */,
@@ -346,6 +364,12 @@
 			files = (
 				A1000001 /* MadeiraApp.swift in Sources */,
 				A1000002 /* ContentView.swift in Sources */,
+				A1000305 /* LaunchPlan.swift in Sources */,
+				A1000304 /* EmulatorSessionView.swift in Sources */,
+				A1000303 /* LibraryDetailView.swift in Sources */,
+				A1000302 /* LibraryView.swift in Sources */,
+				A1000301 /* EmulatorSession.swift in Sources */,
+				A1000300 /* LibraryModels.swift in Sources */,
 				A1000003 /* LogStore.swift in Sources */,
 				A1000200 /* LogPattern.swift in Sources */,
 				A1000201 /* LogTail.swift in Sources */,

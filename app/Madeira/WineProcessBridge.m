@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <limits.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include "WineProcessBridge.h"
 #include "WineServerBridge.h"
@@ -283,7 +284,8 @@ extern void __wine_main(int argc, char *argv[]);
 extern void wine_log_set_file(const char *path);
 
 static pthread_t g_wine_thread;
-static volatile int g_wine_running = 0;
+static _Atomic int g_wine_running = 0;
+static _Atomic int g_wine_last_exit_code = 0;
 static char *g_prefix_path = NULL;
 
 /***********************************************************************
@@ -524,26 +526,8 @@ static void *wine_process_thread(void *arg) {
          * is the pure branch-feeder) or a writer-side fix. Healer stays
          * opt-in-off. */
 
-        /* Steam game vars. One title reads SteamAppPath as its asset base path and
-         * queries it dozens of times during init, so it must be present before that
-         * title starts.
-         *
-         * KNOWN DEFECT, deliberately left in place for now: this publishes ONE title's
-         * identity to EVERY guest, with overwrite=1. A different title that links a Steam
-         * wrapper therefore sees the wrong app ID. Removing it outright was tested and is
-         * NOT the fix -- it regresses the title that needs the path, and it did not change
-         * the behaviour of the title that was mis-identified, so the mismatch is real but
-         * was not the failure being chased.
-         *
-         * The durable design belongs in the title-launch layer: publish nothing by
-         * default, take the ID from explicit title metadata or the game's own
-         * steam_appid.txt, set SteamAppPath to that game's directory, and give each child
-         * its own environment rather than mutating one process-global set shared by every
-         * pseudo-process. This path usually launches explorer.exe and cannot know which
-         * title the desktop will start later, so a conditional here cannot work. */
-        setenv("SteamAppPath", "C:\\Program Files\\Thumper", 1);
-        setenv("SteamGameId", "356400", 1);
-        setenv("SteamAppId",  "356400", 1);
+        // The library launch plan supplies SteamAppPath and, when present,
+        // the title's own steam_appid.txt. Never publish a different game's ID.
 
         /* iOS-Madeira 2026-07-02: publish the TRUE JIT-pool RX->RW offset to
          * xtajit64.dll (its own FEXCore copy reads this via getenv in
@@ -854,24 +838,50 @@ static void *wine_process_thread(void *arg) {
             snprintf(exe_path, sizeof(exe_path), "C:\\windows\\system32\\%s", madeira_exe);
         }
 
-        // Optional MADEIRA_ARGS env var: space-separated args appended to argv.
-        // Tokenized in-place; max 16 extra tokens.
+        // Library launches use a JSON argv array. Preserve spaces and Unicode
+        // in MSI paths and launch arguments; no shell or whitespace tokenizer.
         static char args_buf[1024];
-        char *extra_argv[16] = {0};
+        char *extra_argv[64] = {0};
         int extra_argc = 0;
-        const char *madeira_args = getenv("MADEIRA_ARGS");
-        if (madeira_args && *madeira_args) {
-            strncpy(args_buf, madeira_args, sizeof(args_buf) - 1);
-            args_buf[sizeof(args_buf) - 1] = 0;
-            char *saveptr = NULL;
-            for (char *tok = strtok_r(args_buf, " ", &saveptr);
-                 tok && extra_argc < 16;
-                 tok = strtok_r(NULL, " ", &saveptr)) {
-                extra_argv[extra_argc++] = tok;
+        __attribute__((objc_precise_lifetime)) NSArray<NSString *> *argumentStorage = nil;
+        const char *argument_json = getenv("MADEIRA_ARGV_JSON");
+        if (argument_json) {
+            NSData *data = [NSData dataWithBytes:argument_json length:strlen(argument_json)];
+            id decoded = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            BOOL valid = [decoded isKindOfClass:[NSArray class]] && [decoded count] <= 64;
+            if (valid) {
+                for (id value in decoded) {
+                    if (![value isKindOfClass:[NSString class]] ||
+                        [value lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > 4096 ||
+                        strlen([value UTF8String]) != [value lengthOfBytesUsingEncoding:NSUTF8StringEncoding]) {
+                        valid = NO;
+                        break;
+                    }
+                }
+            }
+            if (!valid) {
+                LOG("Invalid library launch arguments");
+                g_wine_last_exit_code = -1;
+                wineserver_stop();
+                g_wine_running = 0;
+                return NULL;
+            }
+            argumentStorage = decoded;
+            for (NSString *value in argumentStorage) extra_argv[extra_argc++] = (char *)value.UTF8String;
+        } else {
+            // Preserve the old development environment override.
+            const char *madeira_args = getenv("MADEIRA_ARGS");
+            if (madeira_args && *madeira_args) {
+                strncpy(args_buf, madeira_args, sizeof(args_buf) - 1);
+                args_buf[sizeof(args_buf) - 1] = 0;
+                char *saveptr = NULL;
+                for (char *tok = strtok_r(args_buf, " ", &saveptr);
+                     tok && extra_argc < 16;
+                     tok = strtok_r(NULL, " ", &saveptr)) extra_argv[extra_argc++] = tok;
             }
         }
 
-        char *argv[24];
+        char *argv[68];
         int argc = 0;
         argv[argc++] = "wine";
         argv[argc++] = exe_path;
@@ -927,6 +937,25 @@ static void *wine_process_thread(void *arg) {
             }
         }
 
+        // Explorer/msiexec inherit the selected installer's directory, even
+        // though the bootstrap executable itself lives in system32.
+        const char *launch_cwd = getenv("MADEIRA_LAUNCH_CWD");
+        if (launch_cwd && !strncmp(launch_cwd, "C:\\", 3)) {
+            NSString *relative = [[NSString stringWithUTF8String:launch_cwd + 3]
+                stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
+            NSString *directory = [[NSString stringWithUTF8String:g_prefix_path]
+                stringByAppendingPathComponent:[@"drive_c" stringByAppendingPathComponent:relative]];
+            if (chdir(directory.fileSystemRepresentation) != 0) {
+                LOG("Could not open the selected app's working directory");
+                g_wine_last_exit_code = -1;
+                wineserver_stop();
+                g_wine_running = 0;
+                return NULL;
+            }
+            setenv("PWD", directory.fileSystemRepresentation, 1);
+            setenv("MADEIRA_INITIAL_CWD", launch_cwd, 1);
+        }
+
         // Record this thread so wine_ios_exit knows where to longjmp
         wine_ios_main_thread = pthread_self();
         wine_ios_exit_initialized = 1;
@@ -940,11 +969,12 @@ static void *wine_process_thread(void *arg) {
             dprintf(STDERR_FILENO, "[WineProc] Wine exited with code %d (caught by longjmp)\n", wine_ios_exit_code);
         }
 
-        g_wine_running = 0;
+        g_wine_last_exit_code = wine_ios_exit_code;
 
         // Stop wineserver to prevent CPU spin (iOS kills for excessive CPU)
         dprintf(STDERR_FILENO, "[WineProc] stopping wineserver...\n");
         wineserver_stop();
+        g_wine_running = 0;
 
         dprintf(STDERR_FILENO, "[WineProc] Wine process thread finished cleanly\n");
 
@@ -1019,6 +1049,10 @@ int wine_process_start(const char *prefix_path) {
     pthread_detach(g_wine_thread);
     LOG("Wine process thread created");
     return 0;
+}
+
+int wine_process_last_exit_code(void) {
+    return g_wine_last_exit_code;
 }
 
 int wine_process_is_running(void) {

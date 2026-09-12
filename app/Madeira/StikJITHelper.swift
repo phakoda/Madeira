@@ -58,11 +58,15 @@ enum StikJITHelper {
 
     /// Poll every 0.5s until CS_DEBUGGED is set, then call completion.
     private static func pollForJIT(completion: @escaping (Bool) -> Void) {
+        let deadline = Date().addingTimeInterval(90)
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
             if jit_check_debugged() {
                 timer.invalidate()
                 LogStore.shared.log("JIT enabled! (CS_DEBUGGED set)", level: .success)
                 completion(true)
+            } else if Date() >= deadline {
+                timer.invalidate()
+                completion(false)
             }
         }
     }

@@ -39,6 +39,11 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
+      - name: Verify library source and import behavior
+        run: |
+          python3 tests/check-library-source.py
+          bash tests/run-library-tests.sh
+
       - name: Host dependencies
         run: |
           set -euxo pipefail
