@@ -15,17 +15,46 @@ if(NOT source_revision STREQUAL required_revision)
   message(FATAL_ERROR "BoxedWine source revision does not match runtime.json")
 endif()
 
-find_package(SDL2 REQUIRED)
 find_package(ZLIB REQUIRED)
-find_package(OpenGL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+set(BW "${BOXEDWINE_SOURCE}")
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+  enable_language(OBJC OBJCXX)
+  set(MADEIRA_IOS TRUE)
+  set(OSMESA_ROOT "" CACHE PATH "Static OSMesa produced by build/mesa-ios")
+  if(NOT EXISTS "${OSMESA_ROOT}/libOSMesa.a")
+    message(FATAL_ERROR "Build iOS OSMesa with the matching SDK first")
+  endif()
+  set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+  set(SDL_STATIC ON CACHE BOOL "" FORCE)
+  set(SDL_TEST OFF CACHE BOOL "" FORCE)
+  set(VIDEO_OPENGL OFF CACHE BOOL "" FORCE)
+  set(VIDEO_OPENGLES OFF CACHE BOOL "" FORCE)
+  set(VIDEO_VULKAN OFF CACHE BOOL "" FORCE)
+  set(RENDER_METAL ON CACHE BOOL "" FORCE)
+  add_subdirectory("${BW}/lib/sdl2" "${CMAKE_CURRENT_BINARY_DIR}/sdl2")
+  add_library(madeira-osmesa STATIC IMPORTED)
+  set_target_properties(madeira-osmesa PROPERTIES
+    IMPORTED_LOCATION "${OSMESA_ROOT}/libOSMesa.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${OSMESA_ROOT}/include")
+  set(platform_libraries SDL2-static madeira-osmesa "-framework Foundation")
+  set(gl_definitions MADEIRA_IOS BOXEDWINE_OPENGL_OSMESA "GLH=<GL/gl.h>")
+  execute_process(COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/prepare_ios.py" --source "${BW}"
+    COMMAND_ERROR_IS_FATAL ANY)
+else()
+  find_package(SDL2 REQUIRED)
+  find_package(OpenGL REQUIRED)
+  set(platform_libraries SDL2::SDL2 OpenGL::GL)
+  set(gl_definitions BOXEDWINE_OPENGL_SDL "GLH=<SDL_opengl.h>")
+endif()
 
 execute_process(COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/prepare_embedded.py" --source "${BOXEDWINE_SOURCE}"
   COMMAND_ERROR_IS_FATAL ANY)
 
-set(BW "${BOXEDWINE_SOURCE}")
 file(GLOB_RECURSE emulation CONFIGURE_DEPENDS "${BW}/source/emulation/*.cpp")
 list(FILTER emulation EXCLUDE REGEX "/cpu/(jit|x32|x64|armv7|armv8|wasm)/")
 file(GLOB_RECURSE kernel CONFIGURE_DEPENDS "${BW}/source/kernel/*.cpp")
@@ -40,6 +69,11 @@ list(FILTER common EXCLUDE REGEX "/networkutils\\.cpp$")
 # The caller owns the host event loop and process lifetime.
 list(FILTER common EXCLUDE REGEX "/source/sdl/main\\.cpp$")
 list(FILTER common EXCLUDE REGEX "/source/sdl/singleThreaded/mainloop\\.cpp$")
+if(MADEIRA_IOS)
+  list(FILTER common EXCLUDE REGEX "/source/opengl/sdl/")
+  list(APPEND common "${BW}/source/opengl/osmesa/osmesa.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ios_platform.mm")
+endif()
 file(GLOB softfloat CONFIGURE_DEPENDS
   "${BW}/lib/softfloat/source/*.c" "${BW}/lib/softfloat/source/8086-SSE/*.c")
 add_library(bw_softfloat STATIC ${softfloat})
@@ -57,7 +91,7 @@ target_compile_features(madeira-wine32-engine PRIVATE cxx_std_20)
 target_compile_definitions(madeira-wine32-engine PRIVATE
   MADEIRA_EMBEDDED SDL_MAIN_HANDLED
   BOXEDWINE_DISABLE_UI BOXEDWINE_64 BOXEDWINE_POSIX BOXEDWINE_ZLIB
-  BOXEDWINE_OPENGL_SDL "GLH=<SDL_opengl.h>" SDL2=1 SIMDE_SSE2_NO_NATIVE)
+  ${gl_definitions} SDL2=1 SIMDE_SSE2_NO_NATIVE)
 target_include_directories(madeira-wine32-engine PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}" "${BW}/source/sdl"
   "${BW}/include" "${BW}/lib/simde" "${BW}/lib/asmjit"
@@ -65,8 +99,14 @@ target_include_directories(madeira-wine32-engine PRIVATE
 target_compile_options(madeira-wine32-engine PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-Wno-invalid-offsetof>)
 target_link_libraries(madeira-wine32-engine PRIVATE
-  bw_softfloat SDL2::SDL2 ZLIB::ZLIB OpenGL::GL Threads::Threads ${CMAKE_DL_LIBS})
+  bw_softfloat ${platform_libraries} ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
 
-add_executable(madeira-wine32 embedded_runner.cpp)
-target_compile_features(madeira-wine32 PRIVATE cxx_std_20)
-target_link_libraries(madeira-wine32 PRIVATE madeira-wine32-engine Threads::Threads)
+if(MADEIRA_IOS)
+  add_executable(madeira-wine32-ios-link ios_link_smoke.c)
+  set_target_properties(madeira-wine32-ios-link PROPERTIES LINKER_LANGUAGE CXX)
+  target_link_libraries(madeira-wine32-ios-link PRIVATE madeira-wine32-engine)
+else()
+  add_executable(madeira-wine32 embedded_runner.cpp)
+  target_compile_features(madeira-wine32 PRIVATE cxx_std_20)
+  target_link_libraries(madeira-wine32 PRIVATE madeira-wine32-engine Threads::Threads)
+endif()

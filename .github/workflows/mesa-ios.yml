@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'build/mesa-ios/**'
+      - 'build/boxedwine/**'
       - '.github/workflows/mesa-ios.yml'
 
 permissions:
@@ -32,6 +33,19 @@ jobs:
         run: |
           set -o pipefail
           python3 build/mesa-ios/build.py --sdk '${{ matrix.sdk }}' --deployment-target 17.0 2>&1 | tee /tmp/mesa-build.log
+      - name: Build and link the native Wine32 interpreter for iOS
+        run: |
+          set -o pipefail
+          export PATH="$PWD/build/mesa-ios/.work/${{ matrix.sdk }}/python/bin:$PATH"
+          python3 build/boxedwine/fetch.py --cache /tmp/boxedwine-cache --source /tmp/boxedwine-source
+          cmake -S build/boxedwine -B /tmp/boxedwine-ios -G Ninja \
+            -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT='${{ matrix.sdk }}' \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DBOXEDWINE_SOURCE=/tmp/boxedwine-source \
+            -DOSMESA_ROOT="$PWD/build/mesa-ios/out/${{ matrix.sdk }}" 2>&1 | tee /tmp/wine32-ios-configure.log
+          cmake --build /tmp/boxedwine-ios --parallel 3 2>&1 | tee /tmp/wine32-ios-build.log
+          xcrun vtool -show-build /tmp/boxedwine-ios/madeira-wine32-ios-link
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -41,3 +55,8 @@ jobs:
             build/mesa-ios/.work/${{ matrix.sdk }}/build/meson-logs/
             build/mesa-ios/.work/${{ matrix.sdk }}/link-commands.txt
             /tmp/mesa-build.log
+            /tmp/wine32-ios-*.log
+            /tmp/boxedwine-ios/libmadeira-wine32-engine.a
+            /tmp/boxedwine-ios/libbw_softfloat.a
+            /tmp/boxedwine-ios/sdl2/libSDL2.a
+            /tmp/boxedwine-ios/madeira-wine32-ios-link
