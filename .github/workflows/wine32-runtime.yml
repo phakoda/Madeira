@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: wine32-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   GIT_CONFIG_COUNT: '1'
   GIT_CONFIG_KEY_0: http.userAgent

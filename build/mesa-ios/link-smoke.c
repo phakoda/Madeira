@@ -1,5 +1,6 @@
 #include <GL/osmesa.h>
 #include <GL/gl.h>
+#include <stddef.h>
 
 /* Link the completed static archive, rather than just checking its filename.
  * This can also be called by a Simulator/device test host to verify rendering. */
