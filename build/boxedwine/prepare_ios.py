@@ -48,6 +48,41 @@ def prepare(root):
 
     pglFinish''')
     updates[path] = text
+    # Altered SDL UIKit backend: Madeira owns the window and parent controller.
+    # SDL retains its own controller/Metal view, attached as a normal child.
+    path = root / 'lib/sdl2/src/video/uikit/SDL_uikitview.m'
+    text = path.read_text()
+    old = '''        data.uiwindow.rootViewController = nil;
+        data.uiwindow.rootViewController = data.viewcontroller;'''
+    new = '''        // Madeira: attach SDL's view inside the host controller.
+        extern void madeiraWine32SDLViewChanged(UIViewController*);
+        madeiraWine32SDLViewChanged(data.viewcontroller);'''
+    if text.count(old) == 2:
+        text = text.replace(old, new)
+    elif text.count(new) != 2:
+        raise RuntimeError('Unexpected SDL UIKit view attachment implementation')
+    updates[path] = text
+    path = root / 'lib/sdl2/src/video/uikit/SDL_uikitwindow.m'
+    text = path.read_text()
+    text = replace(text, '        [data.uiwindow makeKeyAndVisible];', '''        // Madeira owns the visible UIWindow.
+        extern void madeiraWine32SDLSetVisible(BOOL);
+        madeiraWine32SDLSetVisible(YES);''')
+    text = replace(text, '        data.uiwindow.hidden = YES;\n    }\n}', '''        extern void madeiraWine32SDLSetVisible(BOOL);
+        madeiraWine32SDLSetVisible(NO);
+    }
+}''')
+    text = text.replace('''            extern void madeiraWine32SDLWillDestroy(UIViewController*);
+            madeiraWine32SDLWillDestroy(data.viewcontroller);
+            [data.viewcontroller stopAnimation];''', '            [data.viewcontroller stopAnimation];')
+    text = replace(text, '''            data.uiwindow.rootViewController = nil;
+            data.uiwindow.hidden = YES;''', '''            extern void madeiraWine32SDLWillDestroy(UIViewController*);
+            madeiraWine32SDLWillDestroy(data.viewcontroller);
+            data.uiwindow.rootViewController = nil;
+            data.uiwindow.hidden = YES;''')
+    updates[path] = text
+    path = root / 'lib/sdl2/src/video/uikit/SDL_uikitmetalview.m'
+    text = replace(path.read_text(), 'data.uiwindow.rootViewController.view', 'data.viewcontroller.view')
+    updates[path] = text
     for path, text in updates.items():
         path.write_text(text)
 

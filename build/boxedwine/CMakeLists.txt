@@ -36,12 +36,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
   set(VIDEO_VULKAN OFF CACHE BOOL "" FORCE)
   set(RENDER_METAL ON CACHE BOOL "" FORCE)
   add_subdirectory("${BW}/lib/sdl2" "${CMAKE_CURRENT_BINARY_DIR}/sdl2")
+  set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ios_platform.mm"
+    PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   add_library(madeira-osmesa STATIC IMPORTED)
   set_target_properties(madeira-osmesa PROPERTIES
     IMPORTED_LOCATION "${OSMESA_ROOT}/libOSMesa.a"
     INTERFACE_INCLUDE_DIRECTORIES "${OSMESA_ROOT}/include")
   set(platform_libraries SDL2-static madeira-osmesa "-framework Foundation")
-  set(gl_definitions MADEIRA_IOS BOXEDWINE_OPENGL_OSMESA "GLH=<GL/gl.h>")
+  set(gl_definitions MADEIRA_IOS BOXEDWINE_OPENGL_OSMESA BOXEDWINE_GLHANDLE_ARB_POINTER "GLH=<GL/gl.h>")
   execute_process(COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/prepare_ios.py" --source "${BW}"
     COMMAND_ERROR_IS_FATAL ANY)
