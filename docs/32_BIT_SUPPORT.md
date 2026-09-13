@@ -2,6 +2,14 @@
 
 This branch adds an x86 interpreter with guest memory translation and a full Wine32 filesystem. The app routing and IPA packaging are implemented in source. See [backend architecture and validation status](WINE32_BACKEND.md) for current execution evidence. The previously built IPA does not acquire this runtime until rebuilt.
 
+## Use the 32-bit runtime
+
+1. Run **Build Madeira IPA** in GitHub Actions with branch `codex/library-ui-and-installer-imports`, then install the resulting IPA.
+2. Import the complete game folder and select its EXE, or open an EXE/MSI installer. Native x86 EXEs select Wine32 automatically. New MSI entries default to 32-bit Windows; their Details screen includes a runtime choice.
+3. Complete setup inside Windows. Exit the installer and use **End session**, then **Find installed apps** to add its installed EXE to the library.
+
+The interpreter does not require JIT. It keeps its Windows installation in `Documents/wine32` and mounts existing imported folders on `D:`. Reopening a 32-bit session preserves installed apps and saves.
+
 ## Files checked
 
 The official Steam installer downloaded from Valve and the supplied game executable both have a COFF machine value of `0x014C`, a PE32 optional header, and no CLR header. Both have native 32-bit entry points. These are not cases of x64 executables being reported as x86.
@@ -30,11 +38,9 @@ No linker changes to remove page zero, architecture-check bypass, or unsupported
 
 The standalone service remains separate from the original Wine/FEX backend. The app's new x86 route uses BoxedWine's existing software MMU throughout instruction execution and emulated system calls. It does not reinterpret native host pointers as 32-bit guest addresses.
 
-A software memory translation layer is a possible engineering route. It must keep 32-bit guest addresses separate from their host backing addresses throughout instruction execution, memory allocation, PE loading, Wine API pointer conversion, callbacks, exceptions, thread state, and shared memory. Translating CPU instructions alone does not satisfy those requirements.
+Running the complete Wine32 filesystem inside the interpreter keeps pointer-bearing Wine structures, callbacks, threads, and memory allocations inside the translated guest address space. This avoids trying to pass 32-bit guest pointers into the ARM64 Wine port.
 
-The other architectural option is a full-system x86 emulator with a separate Windows installation. That would be a separate backend rather than enabling the current Wine/FEX integration.
-
-The native Linux CI suite has executed a real x86 test program, installed it through an MSI, relaunched the installed copy, and verified a Direct3D render target. iOS execution and device game compatibility require separate validation, tracked in the backend notes.
+The native Linux and ARM64 iOS Simulator CI suites have executed a real x86 test program, installed it through an MSI, relaunched the installed copy, and verified a Direct3D render target. The Simulator also verified visible presentation and guest keyboard input. Device game compatibility remains untested; see the execution evidence in the backend notes.
 
 ## JIT control
 
