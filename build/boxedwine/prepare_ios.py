@@ -180,6 +180,23 @@ def prepare(root):
 #ifdef MADEIRA_IOS
     if (madeiraWine32MouseChanged()) isDisplayDirty = true;
 #endif''')
+    text = replace(text, '''void XServer::updateCursor(const XWindowPtr& wnd) {
+	if (pointerWindow == wnd) {
+		KNativeSystem::getScreen()->setCursor(wnd->getCursor());
+	}
+}''', '''void XServer::updateCursor(const XWindowPtr& wnd) {
+    // Wine sets the cursor on its whole window while the pointer can be in
+    // a child drawable. Follow cursor inheritance until an override is found.
+    XWindowPtr current = pointerWindow;
+    while (current) {
+        if (current == wnd) {
+            KNativeSystem::getScreen()->setCursor(pointerWindow->getCursor());
+            return;
+        }
+        if (current->cursor) return;
+        current = current->parent;
+    }
+}''')
     updates[path] = text
     path = root / 'source/x11/xrandr.cpp'
     text = replace(path.read_text(), '    U32 desktopCx = 0;', '''#ifdef MADEIRA_IOS
