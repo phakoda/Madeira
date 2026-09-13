@@ -27,6 +27,21 @@ int main(void) {
     if (!window || SendMessageW(window, WM_APP + 1, 0, 0) != 0x1234) return 31;
     SetForegroundWindow(window);
     SetFocus(window);
+    WCHAR display_test[4];
+    if (GetEnvironmentVariableW(L"MADEIRA_VERIFY_PRESENTATION", display_test, 4)) {
+        int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN);
+        if (width != 1280 || height != 720) {
+            fprintf(stderr, "Unexpected desktop resolution: %dx%d, expected 1280x720\n", width, height);
+            return 49;
+        }
+        POINT target = {32, 32}, actual;
+        ClientToScreen(window, &target);
+        if (!SetCursorPos(target.x, target.y) || !GetCursorPos(&actual) ||
+            abs(actual.x - target.x) > 2 || abs(actual.y - target.y) > 2) {
+            fprintf(stderr, "Mouse position does not round-trip through the scaled viewport\n");
+            return 50;
+        }
+    }
     IDirect3D9 *d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!d3d) return 32;
     D3DPRESENT_PARAMETERS params = {0};
