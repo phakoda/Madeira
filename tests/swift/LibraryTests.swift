@@ -81,6 +81,11 @@ struct LibraryTests {
         let hostArguments = x86Plan.wine32Arguments(rootfs: temp.appendingPathComponent("wine.zip"),
             graphics: temp.appendingPathComponent("graphics.zip"), root: temp, sharedDrive: drive)
         try expect(hostArguments[4].hasSuffix("graphics.zip") && hostArguments[6].hasSuffix("wine.zip"), "Guest graphics overlay must take precedence over the old Wine GL bridge")
+        let resolutionIndex = hostArguments.firstIndex(of: "-resolution")
+        try expect(resolutionIndex.map { hostArguments[$0 + 1] } == "1280x720", "Wine32 must explicitly select an HD desktop")
+        let fullHD = x86Plan.wine32Arguments(rootfs: temp, graphics: temp, root: temp,
+            sharedDrive: drive, resolution: .fullHD)
+        try expect(fullHD.contains("1920x1080"), "Selected display resolution was ignored")
         try expect(Array(hostArguments.suffix(game.arguments.count)) == game.arguments, "Interpreter launch changed argument boundaries")
         x86Game.volume = .wine32
         let installed32Plan = try LaunchPlan.make(item: x86Game, drive: drive)

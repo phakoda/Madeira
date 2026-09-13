@@ -1,5 +1,14 @@
 import Foundation
 
+enum Wine32Resolution: String, CaseIterable, Identifiable {
+    case hd = "1280x720"
+    case fullHD = "1920x1080"
+    case standard = "1024x768"
+    case legacy = "800x600"
+    var id: String { rawValue }
+    var label: String { rawValue.replacingOccurrences(of: "x", with: " × ") }
+}
+
 struct LaunchPlan: Sendable {
     let title: String
     let executable: String
@@ -56,14 +65,20 @@ struct LaunchPlan: Sendable {
         }
     }
 
-    func wine32Arguments(rootfs: URL, graphics: URL, root: URL, sharedDrive: URL) -> [String] {
+    func wine32Arguments(rootfs: URL, graphics: URL, root: URL, sharedDrive: URL,
+                         resolution: Wine32Resolution = .hd) -> [String] {
         // Overlay first: its GL bridge matches the embedded interpreter ABI.
         var result = ["madeira-wine32", "-root", root.path, "-zip", graphics.path, "-zip", rootfs.path,
             "-mount_drive", sharedDrive.path, "d", "-opengl", "osmesa",
+            "-resolution", resolution.rawValue, "-scale_quality", "1",
             "-env", "WINEDEBUG=-all,err+all"]
         if let directory = guestWorkingDirectory { result += ["-w", directory] }
         if let steamAppID { result += ["-env", "SteamAppId=" + steamAppID, "-env", "SteamGameId=" + steamAppID] }
-        return result + ["/bin/wine", executable] + arguments
+        var guestArguments = arguments
+        if desktop, guestArguments.first == "/desktop=Madeira,1024x768" {
+            guestArguments[0] = "/desktop=Madeira," + resolution.rawValue
+        }
+        return result + ["/bin/wine", executable] + guestArguments
     }
 
     static let windowsDesktop = LaunchPlan(title: "Windows desktop", executable: "explorer.exe",

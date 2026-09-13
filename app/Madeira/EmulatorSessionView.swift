@@ -235,6 +235,7 @@ struct MadeiraSettingsView: View {
     @ObservedObject private var controllers = PhysicalControllerBridge.shared
     @ObservedObject private var mice = PhysicalMouseBridge.shared
     @AppStorage("session.showFPS") private var showFPS = false
+    @AppStorage("wine32.resolution") private var wine32Resolution = Wine32Resolution.hd.rawValue
 
     var body: some View {
         Form {
@@ -256,6 +257,13 @@ struct MadeiraSettingsView: View {
             }
             Section("Display") {
                 Toggle("Show frame rate", isOn: $showFPS)
+                Picker("32-bit desktop resolution", selection: $wine32Resolution) {
+                    ForEach(Wine32Resolution.allCases) { resolution in
+                        Text(resolution.label).tag(resolution.rawValue)
+                    }
+                }
+                Text("Applies to the next 32-bit session. Higher resolutions use more graphics processing. Games can select their own resolution.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Toggle("Mouse look", isOn: $input.relative)

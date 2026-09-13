@@ -49,6 +49,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     "${CMAKE_CURRENT_SOURCE_DIR}/build_ios_shaders.py" --source "${BW}" --sdk "${shader_sdk}"
     COMMAND_ERROR_IS_FATAL ANY)
   add_subdirectory("${BW}/lib/sdl2" "${CMAKE_CURRENT_BINARY_DIR}/sdl2")
+  target_sources(SDL2-static PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ios_mouse.c")
+  target_include_directories(SDL2-static PRIVATE "${BW}/lib/sdl2/src")
   get_target_property(sdl_sources SDL2-static SOURCES)
   list(FILTER sdl_sources INCLUDE REGEX "/SDL_render_metal\\.m$")
   if(NOT sdl_sources)

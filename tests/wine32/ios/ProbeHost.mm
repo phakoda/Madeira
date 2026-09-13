@@ -116,6 +116,21 @@
         [self.payload URLByAppendingPathComponent:@"graphics ready.txt"].path]) {
         madeira_wine32_key(43, 1);
         madeira_wine32_key(43, 0);
+        NSString* coordinates = [NSString stringWithContentsOfURL:
+            [self.payload URLByAppendingPathComponent:@"mouse target.txt"] encoding:NSUTF8StringEncoding error:nil];
+        float x, y;
+        if (!coordinates || sscanf(coordinates.UTF8String, "%f %f", &x, &y) != 2) {
+            [self fail:@"Missing guest mouse coordinates"]; return;
+        }
+        UIView* view = self.window.rootViewController.childViewControllers.firstObject.view;
+        CGSize size = view.bounds.size;
+        CGFloat scale = MIN(size.width / 1280.0, size.height / 720.0);
+        float nx = ((size.width - 1280 * scale) / 2 + x * scale) / size.width;
+        float ny = ((size.height - 720 * scale) / 2 + y * scale) / size.height;
+        madeira_wine32_pointer(nx, ny, 1, 1);
+        madeira_wine32_pointer(nx, ny, 1, 0);
+        madeira_wine32_pointer(nx, ny, 3, 1);
+        madeira_wine32_pointer(nx, ny, 3, 0);
         self.sentKey = YES;
     }
     if (self.stage == 3 && !self.sentCapture && [NSFileManager.defaultManager fileExistsAtPath:

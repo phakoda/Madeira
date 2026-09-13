@@ -49,7 +49,7 @@ jobs:
         run: |
           mkdir -p /tmp/wine32-probe /tmp/wine32-prefix
           i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/runtime_probe.c -ladvapi32 -o /tmp/wine32-probe/probe.exe
-          i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/graphics_probe.c -ld3d9 -luser32 -o /tmp/wine32-probe/graphics.exe
+          i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/graphics_probe.c -ld3d9 -luser32 -lgdi32 -o /tmp/wine32-probe/graphics.exe
           cp tests/wine32/probe.wxs /tmp/wine32-probe/
           cp tests/wine32/install.cmd /tmp/wine32-probe/
           (cd /tmp/wine32-probe && wixl -a x86 -o probe.msi probe.wxs)

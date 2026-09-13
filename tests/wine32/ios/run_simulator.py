@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import time
-from check_screen import green_pixel_count
+from check_screen import green_pixel_count, cursor_pixel_count
 
 
 def sim(*args, **kwargs):
@@ -49,9 +49,13 @@ def main():
                     green_pixels = green_pixel_count(screenshot)
                     if green_pixels < 100:
                         raise RuntimeError(f'Direct3D rendered offscreen but its green frame is missing from the iOS display: {green_pixels} pixels')
+                    cursor_pixels = cursor_pixel_count(screenshot)
+                    if cursor_pixels < 25:
+                        raise RuntimeError(f'Guest cursor is missing from the iOS display: {cursor_pixels} pixels')
                     (payload / 'graphics captured.txt').write_text('display-verified\n')
                     presentation_seen = True
                     print(f'Confirmed {green_pixels} green pixels on the Simulator display', flush=True)
+                    print(f'Confirmed {cursor_pixels} guest cursor pixels on the Simulator display', flush=True)
                 if result.exists():
                     state = json.loads(result.read_text())
                     if state['detail'] != last_stage:

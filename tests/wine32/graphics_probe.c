@@ -5,14 +5,22 @@
 #include <d3d9.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static int received_tab;
 static int received_capture;
+static int received_left, received_right;
+static HCURSOR test_cursor;
 
 static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
     if (message == WM_APP + 1) return 0x1234;
     if (message == WM_KEYDOWN && w == VK_TAB) received_tab = 1;
     if (message == WM_KEYDOWN && w == VK_RETURN) received_capture = 1;
+    if (message == WM_SETCURSOR && test_cursor) { SetCursor(test_cursor); return TRUE; }
+    if (abs((short)LOWORD(l) - 32) <= 4 && abs((short)HIWORD(l) - 32) <= 4) {
+        if (message == WM_LBUTTONDOWN) received_left = 1;
+        if (message == WM_RBUTTONDOWN) received_right = 1;
+    }
     return DefWindowProcW(window, message, w, l);
 }
 
@@ -37,7 +45,7 @@ int main(void) {
         POINT target = {32, 32}, actual;
         ClientToScreen(window, &target);
         if (!SetCursorPos(target.x, target.y) || !GetCursorPos(&actual) ||
-            abs(actual.x - target.x) > 2 || abs(actual.y - target.y) > 2) {
+            abs(actual.x - target.x) > 4 || abs(actual.y - target.y) > 4) {
             fprintf(stderr, "Mouse position does not round-trip through the scaled viewport\n");
             return 50;
         }
@@ -82,6 +90,23 @@ int main(void) {
     if (FAILED(IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL))) return 46;
     WCHAR verify[4];
     if (GetEnvironmentVariableW(L"MADEIRA_VERIFY_PRESENTATION", verify, 4)) {
+        DWORD color[16 * 16];
+        BYTE mask[16 * 2] = {0};
+        for (int i = 0; i < 16 * 16; ++i) color[i] = 0xffff00ff;
+        ICONINFO icon = {0};
+        icon.hbmColor = CreateBitmap(16, 16, 1, 32, color);
+        icon.hbmMask = CreateBitmap(16, 16, 1, 1, mask);
+        test_cursor = CreateIconIndirect(&icon);
+        DeleteObject(icon.hbmColor);
+        DeleteObject(icon.hbmMask);
+        if (!test_cursor) return 51;
+        SetCursor(test_cursor);
+        POINT point = {32, 32};
+        ClientToScreen(window, &point);
+        FILE* coordinates = fopen("D:\\mouse target.txt", "w");
+        if (!coordinates) return 52;
+        fprintf(coordinates, "%ld %ld", point.x, point.y);
+        fclose(coordinates);
         HANDLE ready = CreateFileW(L"D:\\graphics ready.txt", GENERIC_WRITE, 0, NULL,
                                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if (ready == INVALID_HANDLE_VALUE) return 47;
@@ -93,7 +118,7 @@ int main(void) {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
-            if (received_tab && received_capture) {
+            if (received_tab && received_capture && received_left && received_right) {
                 captured = 1;
                 break;
             }
@@ -102,8 +127,8 @@ int main(void) {
             Sleep(100);
         }
         if (!captured) {
-            fprintf(stderr, "Presentation/input verification timed out; received Tab: %d, capture: %d\n",
-                    received_tab, received_capture);
+            fprintf(stderr, "Presentation/input verification timed out; Tab: %d, capture: %d, left: %d, right: %d\n",
+                    received_tab, received_capture, received_left, received_right);
             return 48;
         }
     }

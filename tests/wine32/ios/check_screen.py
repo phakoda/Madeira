@@ -5,7 +5,7 @@ import struct
 import zlib
 
 
-def green_pixel_count(path: Path) -> int:
+def color_pixel_count(path: Path, color_name: str) -> int:
     data = path.read_bytes()
     if data[:8] != b'\x89PNG\r\n\x1a\n':
         raise ValueError('Expected a PNG Simulator screenshot')
@@ -56,7 +56,16 @@ def green_pixel_count(path: Path) -> int:
         for x in range(0, stride, channels):
             red, green, blue = row[x:x + 3]
             # Account for display color conversion and edge interpolation.
-            if red < 80 and green > 110 and blue < 110 and green > red * 2 and green > blue * 2:
+            matches = (red < 80 and green > 110 and blue < 110 and green > red * 2 and green > blue * 2) if color_name == 'green' else (red > 180 and blue > 150 and green < 90)
+            if matches:
                 count += 1
         previous = row
     return count
+
+
+def green_pixel_count(path: Path) -> int:
+    return color_pixel_count(path, 'green')
+
+
+def cursor_pixel_count(path: Path) -> int:
+    return color_pixel_count(path, 'magenta')

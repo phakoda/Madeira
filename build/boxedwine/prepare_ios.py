@@ -43,6 +43,7 @@ def prepare(root):
             input->scaleXOffset = input->scaleYOffset = 0;
             if (SDL_RenderSetLogicalSize(renderer, input->width, input->height) != 0)
                 kpanic_fmt("SDL logical display failed: %s", SDL_GetError());
+            madeiraWine32MouseRenderer(renderer, window);
 #endif
         }
     }
@@ -57,6 +58,34 @@ def prepare(root):
 #endif
 
     // If full screen, then we just have to change the scale''')
+    text = replace(text, '#include <SDL.h>', '''#include <SDL.h>
+#ifdef MADEIRA_IOS
+#include "ios_mouse.h"
+#endif''')
+    text = replace(text, '        SDL_RenderPresent(renderer);', '''#ifdef MADEIRA_IOS
+        madeiraWine32MouseDraw();
+#endif
+        SDL_RenderPresent(renderer);''')
+    text = replace(text, '        SDL_DestroyRenderer(renderer);', '''#ifdef MADEIRA_IOS
+        madeiraWine32MouseClearRenderer();
+#endif
+        SDL_DestroyRenderer(renderer);''')
+    text = replace(text, '            SDL_WarpMouseInWindow(window, x, y);', '''#ifdef MADEIRA_IOS
+            madeiraWine32MouseWarp(x, y);
+#else
+            SDL_WarpMouseInWindow(window, x, y);
+#endif''')
+    updates[path] = text
+    path = root / 'platform/sdl/knativeinputSDL.cpp'
+    text = replace(path.read_text(), '#include <SDL.h>', '''#include <SDL.h>
+#ifdef MADEIRA_IOS
+#include "ios_mouse.h"
+#endif''')
+    text = replace(text, '    SDL_GetMouseState(x, y);', '''#ifdef MADEIRA_IOS
+    madeiraWine32MousePosition(x, y);
+#else
+    SDL_GetMouseState(x, y);
+#endif''')
     updates[path] = text
     path = root / 'platform/linux/platform.cpp'
     text = path.read_text()
@@ -117,11 +146,34 @@ def prepare(root):
                    '#else\n    {\n\tU32 count = KSystem::getPixelFormatCount();')
     text = replace(text, '\t}\n#endif\n}\n\nCLXFBConfigPtr XServer::getFbConfig',
                    '\t}\n    }\n#endif\n}\n\nCLXFBConfigPtr XServer::getFbConfig')
+    text = replace(text, '#include "boxedwine.h"', '''#include "boxedwine.h"
+#ifdef MADEIRA_IOS
+#include "ios_mouse.h"
+#endif''')
+    text = replace(text, 'void XServer::draw(bool drawNow) {', '''void XServer::draw(bool drawNow) {
+#ifdef MADEIRA_IOS
+    if (madeiraWine32MouseChanged()) isDisplayDirty = true;
+#endif''')
     updates[path] = text
     # Altered SDL UIKit backend: Madeira owns the window and parent controller.
     # SDL retains its own controller/Metal view, attached as a normal child.
     path = root / 'lib/sdl2/src/video/uikit/SDL_uikitview.m'
     text = path.read_text()
+    text = replace(text, '        self.autoresizesSubviews = YES;', '''        self.autoresizesSubviews = YES;
+        // Madeira: report physical mouse/trackpad hover through SDL input.
+        [self addGestureRecognizer:[[UIHoverGestureRecognizer alloc] initWithTarget:self action:@selector(madeiraHover:)]];''')
+    text = replace(text, '- (void)setSDLWindow:(SDL_Window *)window', '''- (void)madeiraHover:(UIHoverGestureRecognizer*)gesture
+{
+    if (gesture.state == UIGestureRecognizerStateBegan || gesture.state == UIGestureRecognizerStateChanged) {
+        CGPoint p = [gesture locationInView:self];
+        if (self.bounds.size.width > 0 && self.bounds.size.height > 0) {
+            extern void madeira_wine32_pointer(float, float, int, int);
+            madeira_wine32_pointer(p.x / self.bounds.size.width, p.y / self.bounds.size.height, 0, -1);
+        }
+    }
+}
+
+- (void)setSDLWindow:(SDL_Window *)window''')
     old = '''        data.uiwindow.rootViewController = nil;
         data.uiwindow.rootViewController = data.viewcontroller;'''
     new = '''        // Madeira: attach SDL's view inside the host controller.

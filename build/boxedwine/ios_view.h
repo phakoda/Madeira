@@ -16,6 +16,9 @@ void madeira_wine32_remove_view_host(UIViewController* parent);
 void madeira_wine32_show_keyboard(void);
 // SDL/USB HID scancode, used by the session toolbar.
 void madeira_wine32_key(int scancode, int down);
+// Normalized display-view coordinates. button is 1=left or 3=right;
+// down=-1 moves the pointer, 0 releases, 1 presses.
+void madeira_wine32_pointer(float x, float y, int button, int down);
 
 #ifdef __cplusplus
 }

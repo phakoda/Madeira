@@ -18,7 +18,8 @@ final class Wine32Session: NSObject {
         try FileManager.default.createDirectory(at: LibraryFiles.wine32Root, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: LibraryFiles.drive, withIntermediateDirectories: true)
         let arguments = plan.wine32Arguments(rootfs: rootfs, graphics: graphics,
-            root: LibraryFiles.wine32Root, sharedDrive: LibraryFiles.drive)
+            root: LibraryFiles.wine32Root, sharedDrive: LibraryFiles.drive,
+            resolution: Wine32Resolution(rawValue: UserDefaults.standard.string(forKey: "wine32.resolution") ?? "") ?? .hd)
         var storage: [UnsafeMutablePointer<CChar>] = []
         defer { storage.forEach { free($0) } }
         for argument in arguments {

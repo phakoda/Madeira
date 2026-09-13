@@ -33,7 +33,7 @@ jobs:
           sudo apt-get -o 'Acquire::http::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' -o 'Acquire::https::User-Agent=OpenAI File Downloader, XaiImageApiFetch/1.0' install -y gcc-mingw-w64-i686 gcc-multilib libgl-dev libglu1-mesa-dev wixl
           mkdir -p /tmp/payload
           i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/runtime_probe.c -ladvapi32 -o /tmp/payload/probe.exe
-          i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/graphics_probe.c -ld3d9 -luser32 -o /tmp/payload/graphics.exe
+          i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror tests/wine32/graphics_probe.c -ld3d9 -luser32 -lgdi32 -o /tmp/payload/graphics.exe
           cp tests/wine32/probe.wxs tests/wine32/install.cmd /tmp/payload/
           (cd /tmp/payload && wixl -a x86 -o probe.msi probe.wxs)
       - name: Build matching i386 guest OpenGL bridge

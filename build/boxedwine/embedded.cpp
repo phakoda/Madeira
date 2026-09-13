@@ -69,6 +69,10 @@ extern "C" int madeira_wine32_start(int argc, const char** argv) {
             throw std::runtime_error("Invalid Wine32 launch arguments");
         }
         session->disableLinearMemory = true;
+#ifdef MADEIRA_IOS
+        if (!session->resolutionSet) session->setResolution(B("1280x720"));
+        session->sdlScaleQuality = B("1");
+#endif
         KSystem::startMicroCounter();
         // Fs::nativePathSeperator is initialized by begin(). Before that,
         // upstream's native parent-path helper dereferences an empty BString.
