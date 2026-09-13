@@ -25,6 +25,7 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM w, LPARAM 
 }
 
 int main(void) {
+    int display_failures = 0;
     WNDCLASSW klass = {0};
     klass.lpfnWndProc = window_proc;
     klass.hInstance = GetModuleHandleW(NULL);
@@ -40,14 +41,15 @@ int main(void) {
         int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN);
         if (width != 1280 || height != 720) {
             fprintf(stderr, "Unexpected desktop resolution: %dx%d, expected 1280x720\n", width, height);
-            return 49;
+            display_failures |= 1;
         }
-        POINT target = {32, 32}, actual;
+        POINT target = {32, 32}, actual = {-1, -1};
         ClientToScreen(window, &target);
         if (!SetCursorPos(target.x, target.y) || !GetCursorPos(&actual) ||
             abs(actual.x - target.x) > 4 || abs(actual.y - target.y) > 4) {
-            fprintf(stderr, "Mouse position does not round-trip through the scaled viewport\n");
-            return 50;
+            fprintf(stderr, "Mouse position mismatch: requested %ld,%ld, got %ld,%ld\n",
+                    target.x, target.y, actual.x, actual.y);
+            display_failures |= 2;
         }
     }
     IDirect3D9 *d3d = Direct3DCreate9(D3D_SDK_VERSION);
@@ -105,7 +107,8 @@ int main(void) {
         ClientToScreen(window, &point);
         FILE* coordinates = fopen("D:\\mouse target.txt", "w");
         if (!coordinates) return 52;
-        fprintf(coordinates, "%ld %ld", point.x, point.y);
+        fprintf(coordinates, "%ld %ld %d %d", point.x, point.y,
+                GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
         fclose(coordinates);
         HANDLE ready = CreateFileW(L"D:\\graphics ready.txt", GENERIC_WRITE, 0, NULL,
                                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -131,6 +134,7 @@ int main(void) {
                     received_tab, received_capture, received_left, received_right);
             return 48;
         }
+        if (display_failures) return 53;
     }
     IDirect3DSurface9_Release(readback);
     IDirect3DSurface9_Release(target);
