@@ -160,6 +160,38 @@ def prepare(root):
     if (madeiraWine32MouseChanged()) isDisplayDirty = true;
 #endif''')
     updates[path] = text
+    path = root / 'source/x11/xrandr.cpp'
+    text = replace(path.read_text(), '    U32 desktopCx = 0;', '''#ifdef MADEIRA_IOS
+    // Guest modes are independent of the phone's physical display. Omitting
+    // the configured mode makes XrrConfigCurrentConfiguration fall back to
+    // index zero and Wine reports the wrong desktop size.
+    const U32 candidates[][2] = {
+        {KNativeSystem::getScreen()->screenWidth(), KNativeSystem::getScreen()->screenHeight()},
+        {1920, 1080}, {1600, 900}, {1280, 720}, {1024, 768}, {800, 600}, {640, 480}
+    };
+    std::vector<std::pair<U32, U32>> modes;
+    for (const auto& candidate : candidates) {
+        bool duplicate = false;
+        for (const auto& mode : modes) {
+            if (mode.first == candidate[0] && mode.second == candidate[1]) duplicate = true;
+        }
+        if (!duplicate) modes.emplace_back(candidate[0], candidate[1]);
+    }
+    U32 address = thread->process->alloc(thread, sizeof(XRRScreenSize) * modes.size());
+    data->xrrData->sizesAddress = address;
+    data->xrrData->sizesCount = modes.size();
+    for (const auto& mode : modes) {
+        memory->writed(address, mode.first);
+        memory->writed(address + 4, mode.second);
+        memory->writed(address + 8, 0);
+        memory->writed(address + 12, 0);
+        address += sizeof(XRRScreenSize);
+    }
+    if (countAddress) memory->writed(countAddress, data->xrrData->sizesCount);
+    return data->xrrData->sizesAddress;
+#endif
+    U32 desktopCx = 0;''')
+    updates[path] = text
     # Altered SDL UIKit backend: Madeira owns the window and parent controller.
     # SDL retains its own controller/Metal view, attached as a normal child.
     path = root / 'lib/sdl2/src/video/uikit/SDL_uikitview.m'
