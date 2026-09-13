@@ -132,8 +132,11 @@ target_compile_options(madeira-wine32-engine PRIVATE
 target_link_libraries(madeira-wine32-engine PRIVATE
   bw_softfloat ${platform_libraries} ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
 if(MADEIRA_SANITIZE)
-  target_compile_options(madeira-wine32-engine PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_compile_options(madeira-wine32-engine PRIVATE -g -fsanitize=address -fno-omit-frame-pointer)
   target_link_options(madeira-wine32-engine INTERFACE -fsanitize=address)
+  if(MADEIRA_IOS)
+    target_compile_options(SDL2-static PRIVATE -g -fsanitize=address -fno-omit-frame-pointer)
+  endif()
 endif()
 
 if(MADEIRA_IOS)
@@ -161,6 +164,23 @@ if(MADEIRA_IOS)
     target_compile_features(MadeiraWine32Probe PRIVATE cxx_std_20)
     target_link_libraries(MadeiraWine32Probe PRIVATE madeira-wine32-engine
       "-framework UIKit" "-framework QuartzCore")
+    if(MADEIRA_SANITIZE)
+      if(NOT shader_sdk STREQUAL "iphonesimulator")
+        message(FATAL_ERROR "The instrumented iOS probe is Simulator-only")
+      endif()
+      execute_process(COMMAND xcrun --sdk iphonesimulator clang -print-resource-dir
+        OUTPUT_VARIABLE clang_resource OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+      set(asan_runtime "${clang_resource}/lib/darwin/libclang_rt.asan_iossim_dynamic.dylib")
+      if(NOT EXISTS "${asan_runtime}")
+        message(FATAL_ERROR "Missing Simulator AddressSanitizer runtime")
+      endif()
+      target_compile_options(MadeiraWine32Probe PRIVATE -g -fsanitize=address -fno-omit-frame-pointer)
+      target_link_options(MadeiraWine32Probe PRIVATE "-Wl,-rpath,@executable_path/Frameworks")
+      add_custom_command(TARGET MadeiraWine32Probe POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_DIR:MadeiraWine32Probe>/Frameworks"
+        COMMAND "${CMAKE_COMMAND}" -E copy "${asan_runtime}" "$<TARGET_BUNDLE_DIR:MadeiraWine32Probe>/Frameworks/"
+        VERBATIM)
+    endif()
   endif()
 else()
   add_executable(madeira-wine32 embedded_runner.cpp)

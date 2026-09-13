@@ -38,6 +38,9 @@ def main():
     sdk = mesa_build['sdk']
     flags = ['-target', mesa_build['target'], '-isysroot', subprocess.check_output(
         ['xcrun', '--sdk', sdk, '--show-sdk-path'], text=True).strip()]
+    sanitized = 'MADEIRA_SANITIZE:BOOL=ON' in (args.build / 'CMakeCache.txt').read_text()
+    if sanitized:
+        flags.append('-fsanitize=address')
     smoke_object = args.build / 'packaged-runtime-smoke.o'
     subprocess.run(['xcrun', '--sdk', sdk, 'clang', *flags, '-c',
         Path(__file__).with_name('ios_link_smoke.c'), '-o', smoke_object], check=True)
@@ -58,6 +61,7 @@ def main():
     (resources / 'runtime.json').write_text(json.dumps({'upstream': manifest,
         'guest_graphics_sha256': digest(args.graphics), 'archive_sha256': digest(library),
         'memory': 'sparse software translation', 'cpu': 'x86 interpreter',
+        'address_sanitizer': sanitized,
         'graphics': 'OSMesa softpipe'}, indent=2) + '\n')
     print(f'Packaged {library} and {resources}')
 

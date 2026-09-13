@@ -82,6 +82,7 @@ jobs:
             -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT='${{ matrix.sdk }}' \
             -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DMADEIRA_SANITIZE=${{ matrix.sdk == 'iphonesimulator' && 'ON' || 'OFF' }} \
             -DBOXEDWINE_SOURCE=/tmp/boxedwine-source \
             -DWINE32_PROBE_PAYLOAD=/tmp/payload -DWINE32_PROBE_ROOTFS=/tmp/wine11.zip \
             -DWINE32_PROBE_GRAPHICS=/tmp/graphics/madeira-graphics.zip \
@@ -96,7 +97,9 @@ jobs:
       - name: Run Windows installers and Direct3D through the UIKit host
         if: matrix.sdk == 'iphonesimulator'
         run: |
+          codesign --force --sign - /tmp/boxedwine-ios/MadeiraWine32Probe.app/Frameworks/libclang_rt.asan_iossim_dynamic.dylib
           codesign --force --sign - /tmp/boxedwine-ios/MadeiraWine32Probe.app
+          export SIMCTL_CHILD_ASAN_OPTIONS=detect_leaks=0:abort_on_error=1
           python3 tests/wine32/ios/run_simulator.py --app /tmp/boxedwine-ios/MadeiraWine32Probe.app
       - uses: actions/upload-artifact@v4
         if: always()
