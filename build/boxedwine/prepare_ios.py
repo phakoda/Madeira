@@ -118,6 +118,14 @@ def prepare(root):
     updates[path] = text
     path = root / 'lib/sdl2/src/video/uikit/SDL_uikitwindow.m'
     text = path.read_text()
+    # Upstream's old UIKit raise hook unconditionally restores an ES context.
+    # A Metal-only device has no GL_MakeCurrent callback, so the first visible
+    # Wine window otherwise calls through a null function pointer.
+    text = replace(text,
+        '    _this->GL_MakeCurrent(_this, _this->current_glwin, _this->current_glctx);',
+        '''#if SDL_VIDEO_OPENGL_ES || SDL_VIDEO_OPENGL_ES2
+    _this->GL_MakeCurrent(_this, _this->current_glwin, _this->current_glctx);
+#endif''')
     text = replace(text, '        [data.uiwindow makeKeyAndVisible];', '''        // Madeira owns the visible UIWindow.
         extern void madeiraWine32SDLSetVisible(BOOL);
         madeiraWine32SDLSetVisible(YES);''')
