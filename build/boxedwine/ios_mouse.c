@@ -16,6 +16,11 @@ static SDL_Cursor* visible_cursor;
 static SDL_Texture* texture;
 static int dirty;
 
+static int has_viewport(void) {
+    return renderer && renderer->scale.x > 0 && renderer->scale.y > 0 &&
+        renderer->dpi_scale.x > 0 && renderer->dpi_scale.y > 0;
+}
+
 static void clear_texture(void) {
     if (texture) SDL_DestroyTexture(texture);
     texture = NULL;
@@ -114,6 +119,7 @@ void madeiraWine32MouseClearRenderer(void) {
 void madeiraWine32MousePosition(int* x, int* y) {
     SDL_GetMouseState(x, y);
     if (renderer && renderer->logical_w) {
+        if (!has_viewport()) { *x = *y = 0; return; }
         *x = (int)((*x - renderer->viewport.x * renderer->dpi_scale.x) /
                    (renderer->scale.x * renderer->dpi_scale.x));
         *y = (int)((*y - renderer->viewport.y * renderer->dpi_scale.y) /
@@ -124,7 +130,7 @@ void madeiraWine32MousePosition(int* x, int* y) {
 }
 
 void madeiraWine32MouseWarp(int x, int y) {
-    if (!renderer || !window) return;
+    if (!has_viewport() || !window) return;
     if (renderer->logical_w) {
         x = (int)lroundf((x * renderer->scale.x + renderer->viewport.x) * renderer->dpi_scale.x);
         y = (int)lroundf((y * renderer->scale.y + renderer->viewport.y) * renderer->dpi_scale.y);
@@ -134,7 +140,7 @@ void madeiraWine32MouseWarp(int x, int y) {
 
 void madeira_wine32_pointer(float x, float y, int button, int down) {
     int width, height;
-    if (!window || !isfinite(x) || !isfinite(y)) return;
+    if (!window || !has_viewport() || !isfinite(x) || !isfinite(y)) return;
     SDL_GetWindowSize(window, &width, &height);
     SDL_SendMouseMotion(window, SDL_GetMouse()->mouseID, 0,
         (int)(fminf(fmaxf(x, 0.0f), 1.0f) * (width - 1)),
@@ -148,7 +154,7 @@ void madeiraWine32MouseDraw(void) {
     SDL_Rect dest;
     float magnification;
     int x, y;
-    if (!renderer || !visible_cursor) return;
+    if (!has_viewport() || !visible_cursor) return;
     data = visible_cursor->driverdata;
     if (!texture) {
         texture = SDL_CreateTextureFromSurface(renderer, data->surface);

@@ -86,6 +86,11 @@ def prepare(root):
 #else
     SDL_GetMouseState(x, y);
 #endif''')
+    text = replace(text, '        SDL_GetMouseState(&x, &y);', '''#ifdef MADEIRA_IOS
+        madeiraWine32MousePosition(&x, &y);
+#else
+        SDL_GetMouseState(&x, &y);
+#endif''')
     updates[path] = text
     path = root / 'platform/linux/platform.cpp'
     text = path.read_text()
