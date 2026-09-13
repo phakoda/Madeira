@@ -14,6 +14,7 @@
 @property(nonatomic) CFTimeInterval started;
 @property(nonatomic) BOOL pumping;
 @property(nonatomic) BOOL sentKey;
+@property(nonatomic) BOOL sentCapture;
 @end
 
 @implementation MadeiraWine32Probe
@@ -109,6 +110,15 @@
         madeira_wine32_key(43, 1);
         madeira_wine32_key(43, 0);
         self.sentKey = YES;
+    }
+    if (self.stage == 3 && !self.sentCapture && [NSFileManager.defaultManager fileExistsAtPath:
+        [self.payload URLByAppendingPathComponent:@"graphics captured.txt"].path]) {
+        // The runner creates this only after checking the actual screenshot.
+        // Relay it through input: the guest filesystem caches directory entries
+        // and does not discover files created externally during a session.
+        madeira_wine32_key(40, 1);
+        madeira_wine32_key(40, 0);
+        self.sentCapture = YES;
     }
     NSString* actual = [NSString stringWithContentsOfURL:[self.payload URLByAppendingPathComponent:stage[@"file"]]
         encoding:NSUTF8StringEncoding error:nil];

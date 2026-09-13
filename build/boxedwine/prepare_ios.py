@@ -37,10 +37,26 @@ def prepare(root):
             }
 #ifdef MADEIRA_IOS
             if (!renderer) kpanic_fmt("SDL renderer failed: %s", SDL_GetError());
+            // SDL letterboxes the guest desktop in the actual UIKit viewport
+            // and converts mouse/touch events back to these logical pixels.
+            input->scaleX = input->scaleY = 100;
+            input->scaleXOffset = input->scaleYOffset = 0;
+            if (SDL_RenderSetLogicalSize(renderer, input->width, input->height) != 0)
+                kpanic_fmt("SDL logical display failed: %s", SDL_GetError());
 #endif
         }
     }
 }''')
+    text = replace(text,
+        '    input->setScreenSize(cx, cy);\n\n    // If full screen, then we just have to change the scale',
+        '''    input->setScreenSize(cx, cy);
+#ifdef MADEIRA_IOS
+    if (renderer && SDL_RenderSetLogicalSize(renderer, cx, cy) != 0)
+        kpanic_fmt("SDL logical display resize failed: %s", SDL_GetError());
+    return; // UIKit owns the host view's size; guest resolution is independent.
+#endif
+
+    // If full screen, then we just have to change the scale''')
     updates[path] = text
     path = root / 'platform/linux/platform.cpp'
     text = path.read_text()

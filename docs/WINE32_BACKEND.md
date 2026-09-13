@@ -1,12 +1,12 @@
 # Native Wine32 backend
 
-The active objective is working 32-bit EXE/MSI installation and game-folder execution in the iOS app. The standalone `GuestMemory32` service does not meet that objective, because the existing Wine/FEX route still assumes guest and host pointers are identical.
+Madeira routes native 32-bit EXEs and 32-bit MSI sessions through an x86 interpreter with software guest memory translation. Wine and the Windows program run inside the guest address space. The original 64-bit Wine/FEX route remains separate.
 
 ## Execution architecture
 
 The native [BoxedWine engine](https://github.com/danoon2/Boxedwine/tree/296ff0fa14e0dd1debb0f5898e2e33504f2ad066) provides an existing interpreter and software MMU used throughout x86 CPU execution and emulated Linux system calls. Running its full 32-bit Wine distribution keeps Wine's pointer-bearing structures inside the guest address space. It avoids having to marshal every WOW64/native-Wine structure in Madeira's current ARM64EC port.
 
-The selected initial mode is the native interpreter with sparse memory, selected by `-disableLinearMemory`. No native JIT configuration is enabled. `LaunchPlan` selects this backend for PE machine `0x014C`. The existing 64-bit Wine/FEX backend handles supported 64-bit machine values.
+The embedded adapter forces sparse guest memory by setting `disableLinearMemory` before startup. No native JIT configuration is enabled. `LaunchPlan` selects this backend for PE machine `0x014C`. The existing 64-bit Wine/FEX backend handles supported 64-bit machine values. The standalone `GuestMemory32` service is tested separately; this execution route uses BoxedWine's MMU.
 
 The released browser build was considered and rejected. Its release notes explicitly exclude Direct3D and OpenGL. That would leave the requested game support incomplete. The native engine supports desktop OpenGL through an OSMesa adapter, which renders into its X11 drawable and then presents through SDL textures. The iOS route needs a real iOS build of software Mesa, not a browser-only substitute or a GLES flag standing in for desktop OpenGL.
 
@@ -44,6 +44,8 @@ New MSI imports default to 32-bit Windows. Details includes an explicit installe
 
 ## Remaining validation
 
-The source changes do not establish game compatibility. Library tests and the complete iOS Swift type check passed in [run 34725957420](https://github.com/phakoda/Madeira/actions/runs/34725957420). Final runtime packaging and visible presentation still await their CI results. Device acceptance must then cover touch coordinates, text input, rotation, returning to the library, audio, and the supplied game. The 32-bit display currently uses SDL input; Madeira's native64 controller-to-keyboard mapping and FPS counter do not measure or control this backend.
+The source changes do not establish game compatibility. Library tests and the complete iOS Swift type check passed in [run 34726473047](https://github.com/phakoda/Madeira/actions/runs/34726473047). Final device runtime packaging and linkage passed in [run 34727233275](https://github.com/phakoda/Madeira/actions/runs/34727233275). That run's AddressSanitizer trace identified the display crash as SDL's UIKit raise hook calling an absent OpenGL context callback in a Metal-only build. The source patch now compiles that restoration only when OpenGL ES is enabled. The follow-up [run 34727753519](https://github.com/phakoda/Madeira/actions/runs/34727753519) passed runtime, MSI, and installed-EXE stages, displayed 68,284 green pixels, and delivered Tab to the Windows window. Its final handshake failed because the guest did not discover a screenshot acknowledgement file created by the host. The fixture now relays that acknowledgement through Enter after the native host observes the file. The next run also checks the corrected aspect ratio through SDL logical rendering.
+
+Device acceptance must cover touch coordinates, text input, rotation, returning to the library, audio, and the supplied game. The 32-bit display currently uses SDL input; Madeira's native64 controller-to-keyboard mapping and FPS counter do not measure or control this backend.
 
 The supplied game and Steam installer have not been executed on the user's device by this work. CPU interpretation and software graphics can be slow. A 32-bit installer that launches 64-bit components cannot run those components inside the x86 guest.

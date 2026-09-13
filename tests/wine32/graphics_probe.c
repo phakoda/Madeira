@@ -7,10 +7,12 @@
 #include <stdio.h>
 
 static int received_tab;
+static int received_capture;
 
 static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
     if (message == WM_APP + 1) return 0x1234;
     if (message == WM_KEYDOWN && w == VK_TAB) received_tab = 1;
+    if (message == WM_KEYDOWN && w == VK_RETURN) received_capture = 1;
     return DefWindowProcW(window, message, w, l);
 }
 
@@ -76,7 +78,7 @@ int main(void) {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
-            if (received_tab && GetFileAttributesW(L"D:\\graphics captured.txt") != INVALID_FILE_ATTRIBUTES) {
+            if (received_tab && received_capture) {
                 captured = 1;
                 break;
             }
@@ -85,7 +87,8 @@ int main(void) {
             Sleep(100);
         }
         if (!captured) {
-            fprintf(stderr, "Presentation/input verification timed out; received Tab: %d\n", received_tab);
+            fprintf(stderr, "Presentation/input verification timed out; received Tab: %d, capture: %d\n",
+                    received_tab, received_capture);
             return 48;
         }
     }
