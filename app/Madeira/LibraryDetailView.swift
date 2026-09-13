@@ -98,7 +98,7 @@ struct LibraryDetailView: View {
                         }
                         .buttonStyle(.borderedProminent).foregroundStyle(MadeiraStyle.background)
                         if item.kind == .installer {
-                            Text("Complete the setup wizard in Windows. Then use Add to library → Find installed apps to choose the installed app's executable. Copying an installer does not install the app.")
+                            Text("Complete the setup wizard in Windows. For a 32-bit session, close the installer and use the stop button to end the session. Then use Add to library → Find installed apps to choose the installed executable.")
                                 .font(.subheadline).foregroundStyle(MadeiraStyle.secondary)
                         }
                         VStack(alignment: .leading, spacing: 14) {

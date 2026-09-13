@@ -306,7 +306,7 @@ struct MadeiraHelpView: View {
             }
             Section("Install an app") {
                 Text("Use Open an installer to import an .exe or .msi, then tap Run installer. Complete the Windows setup wizard using the trackpad and keyboard controls.")
-                Text("After setup, return to the library and use Find installed apps to add the installed executable. If the installer needs extra files, import its entire folder and choose its setup executable.")
+                Text("After setup, close the installer. In a 32-bit session, use the stop button to end Windows before launching another app. Return to the library and use Find installed apps to add the installed executable. If the installer needs extra files, import its entire folder and choose its setup executable.")
             }
             Section("Before you play") {
                 Text("Set up StikDebug on your device. Madeira will ask to enable JIT when a session needs it. The signed app also needs the memory and virtual-address entitlements expected by this emulator.")
