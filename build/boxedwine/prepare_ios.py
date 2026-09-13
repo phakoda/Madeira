@@ -22,6 +22,27 @@ def prepare(root):
         '#if (SDL_VIDEO_OPENGL && __MACOSX__) || __IPHONEOS__ || __ANDROID__ || __NACL__',
         '#if (SDL_VIDEO_OPENGL && __MACOSX__) || (__IPHONEOS__ && SDL_VIDEO_OPENGL_ES2) || __ANDROID__ || __NACL__')
     updates[path] = text
+    path = root / 'lib/sdl2/src/render/SDL_render.c'
+    text = replace(path.read_text(), '''                if (renderer->logical_w) {
+                    UpdateLogicalSize(renderer);''', '''                // Madeira: UIKit can resize the embedded view after renderer
+                // creation. Refresh the point-to-pixel ratio before mapping input.
+                if (renderer->GetOutputSize) {
+                    int window_w, window_h, output_w, output_h;
+                    SDL_GetWindowSize(window, &window_w, &window_h);
+                    if (renderer->GetOutputSize(renderer, &output_w, &output_h) == 0 && output_w > 0 && output_h > 0) {
+                        renderer->dpi_scale.x = (float)window_w / output_w;
+                        renderer->dpi_scale.y = (float)window_h / output_h;
+                    }
+                }
+                if (renderer->logical_w) {
+                    UpdateLogicalSize(renderer);''')
+    updates[path] = text
+    path = root / 'source/x11/x11common.cpp'
+    text = replace(path.read_text(), '''    memory->writed(ARG9, server->getInputModifiers());
+    EAX = Success;''', '''    memory->writed(ARG9, server->getInputModifiers());
+    // XQueryPointer returns Bool, not an X11 error code (Success is zero).
+    EAX = True;''')
+    updates[path] = text
     path = root / 'platform/sdl/knativescreenSDL.cpp'
     text = replace(path.read_text(), '            klog_fmt("SDL_CreateWindow failed: %s", SDL_GetError());',
         '''#ifdef MADEIRA_IOS
