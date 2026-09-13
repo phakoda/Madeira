@@ -161,6 +161,18 @@ def prepare(root):
     path = root / 'lib/sdl2/src/video/uikit/SDL_uikitmetalview.m'
     text = replace(path.read_text(), 'data.uiwindow.rootViewController.view', 'data.viewcontroller.view')
     updates[path] = text
+    path = root / 'lib/sdl2/src/video/uikit/SDL_uikitvideo.m'
+    text = replace(path.read_text(), '''    CGRect frame = screen.bounds;
+
+    /* Use the UIWindow bounds''', '''    // Madeira embeds SDL in a child controller. Keyboard and fullscreen
+    // updates must keep using that host's bounds, including SwiftUI toolbars.
+    if (data.viewcontroller.parentViewController) {
+        return data.viewcontroller.parentViewController.view.bounds;
+    }
+    CGRect frame = screen.bounds;
+
+    /* Use the UIWindow bounds''')
+    updates[path] = text
     for path, text in updates.items():
         path.write_text(text)
 

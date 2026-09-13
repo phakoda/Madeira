@@ -69,7 +69,14 @@
         UIViewController* replacement = [UIViewController new];
         replacement.view.backgroundColor = UIColor.blackColor;
         self.window.rootViewController = replacement;
-        madeira_wine32_set_view_host(replacement);
+        // Exercise an embedded viewport, as used beside Madeira's toolbars.
+        UIViewController* viewport = [UIViewController new];
+        [replacement addChildViewController:viewport];
+        viewport.view.frame = CGRectInset(replacement.view.bounds, 24, 96);
+        viewport.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [replacement.view addSubview:viewport.view];
+        [viewport didMoveToParentViewController:replacement];
+        madeira_wine32_set_view_host(viewport);
         madeira_wine32_remove_view_host(old);
     }
     [NSFileManager.defaultManager removeItemAtURL:[self.payload URLByAppendingPathComponent:stage[@"file"]] error:nil];
