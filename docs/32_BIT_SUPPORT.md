@@ -10,6 +10,10 @@ This branch adds an x86 interpreter with guest memory translation and a full Win
 
 The interpreter does not require JIT. It keeps its Windows installation in `Documents/wine32` and mounts existing imported folders on `D:`. Reopening a 32-bit session preserves installed apps and saves.
 
+The default desktop is 1280 × 720. **Settings → Display → 32-bit desktop resolution** also offers 1920 × 1080, 1024 × 768, and 800 × 600. The choice applies to the next session, including installer desktop windows. A game can select its own rendering resolution; changing the desktop does not add detail to its original artwork.
+
+The iOS backend draws the guest mouse cursor itself. Pointer position queries and movement use the same guest coordinates as scaled touch events. The SwiftUI display host preserves SDL's raw touch delivery.
+
 ## Files checked
 
 The official Steam installer downloaded from Valve and the supplied game executable both have a COFF machine value of `0x014C`, a PE32 optional header, and no CLR header. Both have native 32-bit entry points. These are not cases of x64 executables being reported as x86.
@@ -40,7 +44,7 @@ The standalone service remains separate from the original Wine/FEX backend. The 
 
 Running the complete Wine32 filesystem inside the interpreter keeps pointer-bearing Wine structures, callbacks, threads, and memory allocations inside the translated guest address space. This avoids trying to pass 32-bit guest pointers into the ARM64 Wine port.
 
-The native Linux and ARM64 iOS Simulator CI suites have executed a real x86 test program, installed it through an MSI, relaunched the installed copy, and verified a Direct3D render target. The Simulator also verified visible presentation and guest keyboard input. Device game compatibility remains untested; see the execution evidence in the backend notes.
+The native Linux and ARM64 iOS Simulator CI suites have executed a real x86 test program, installed it through an MSI, relaunched the installed copy, and verified a Direct3D render target. The Simulator also verified the 1280 × 720 desktop, a visible guest cursor, cursor position queries, left/right clicks, and guest keyboard input. Device game compatibility remains untested; see the execution evidence in the backend notes.
 
 ## JIT control
 
