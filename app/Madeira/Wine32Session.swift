@@ -74,9 +74,27 @@ final class Wine32Session: NSObject {
 }
 
 @MainActor
+private final class Wine32HostController: UIViewController {
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Match the native display's touch handling. SwiftUI's ancestor
+        // recognizers can otherwise delay or cancel SDL's raw UIKit touches.
+        var ancestor: UIView? = view
+        while let current = ancestor {
+            current.gestureRecognizers?.forEach {
+                $0.cancelsTouchesInView = false
+                $0.delaysTouchesBegan = false
+                $0.delaysTouchesEnded = false
+            }
+            ancestor = current.superview
+        }
+    }
+}
+
+@MainActor
 struct Wine32Display: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
-        let controller = UIViewController()
+        let controller = Wine32HostController()
         controller.view.backgroundColor = .black
         madeira_wine32_set_view_host(controller)
         return controller
