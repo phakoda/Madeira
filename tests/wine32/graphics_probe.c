@@ -114,12 +114,19 @@ int main(void) {
                                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if (ready == INVALID_HANDLE_VALUE) return 47;
         CloseHandle(ready);
-        int captured = 0;
+        int captured = 0, pointer_ready = 0;
         for (int attempt = 0; attempt < 600; ++attempt) {
             MSG message;
             while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
+            }
+            if (received_left && received_right && !pointer_ready) {
+                HANDLE input = CreateFileW(L"D:\\pointer ready.txt", GENERIC_WRITE, 0, NULL,
+                                          CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (input == INVALID_HANDLE_VALUE) return 54;
+                CloseHandle(input);
+                pointer_ready = 1;
             }
             if (received_tab && received_capture && received_left && received_right) {
                 captured = 1;

@@ -41,7 +41,9 @@ def main():
             last_stage = None
             presentation_seen = False
             while time.monotonic() < deadline:
-                if not presentation_seen and (payload / 'graphics ready.txt').exists():
+                # The guest must process both clicks before capture. Merely
+                # queuing SDL events does not mean Wine selected its cursor yet.
+                if not presentation_seen and (payload / 'pointer ready.txt').exists():
                     screenshot = Path('/tmp/wine32-ios-presented.png')
                     # Allow the queued Metal frame to reach the Simulator display.
                     time.sleep(1)
